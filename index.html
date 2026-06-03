@@ -438,7 +438,7 @@ const RANGED=[
   {name:'火焰槍 FLAMER', color:'#ff7a1a',speed:4.2,dmg:4, rate:5, cnt:1,spread:0.18,pierce:false,sz:7,life:26,snd:'E4'},
   {name:'電磁砲 RAILGUN',color:'#5ad6ff',speed:11, dmg:34,rate:34,cnt:1,spread:0,pierce:true,sz:6,snd:'A5'},
   {name:'槍榴彈 GRENADE',color:'#a8e063',speed:4.4,dmg:40,rate:60,cnt:1,spread:0,pierce:false,sz:7,snd:'G3',lob:true,blast:46},
-  {name:'充能步槍 CHARGE RIFLE',color:'#a0e4ff',speed:4.8,dmg:12,rate:21,cnt:1,spread:0,pierce:false,sz:5,snd:'B4'}
+  {name:'充能步槍 CHARGE RIFLE',color:'#a0e4ff',speed:6.5,dmg:14,rate:21,cnt:1,spread:0,pierce:false,sz:5,snd:'B4'}
 ];
 const GRENADE_RATE=[60,49,38,27,16]; // per-level fire interval (frames): ~1s -> ~0.27s
 const MELEE=[
@@ -493,7 +493,7 @@ const player={x:60,y:GROUND-44,w:26,h:44,vx:0,vy:0,onGround:true,face:1,
   hp:100,maxhp:100,shield:0,rw:0,mw:0,rlvl:[1,1,1,1,1],mlvl:[1,1,1],
   fireCD:0,meleeCD:0,meleeAnim:0,energy:0,inv:0,blessing:0,walk:0,dashCD:0,dashTimer:0,dashVx:0,dashVy:0,dashHits:null,
   meleeDmgMult:1,dashDmgMult:1,dmgMult:1,maxShield:60,maxEnergy:100,
-  dashCDMax:52,diveReady:false,diving:false,diveHits:null,chargeTimer:0};
+  dashCDMax:52,diveReady:false,diving:false,diveHits:null,chargeTimer:0,dashTrail:[]};
 let bullets=[],ebullets=[],enemies=[],drops=[],particles=[],platforms=[],pools=[],shockwaves=[];
 let boss=null,bossIntro=0,score=0;
 let bgStars=[],bgBuildings=[],bgFarFight=[],satellites=[],bgSpecialSwarm=[];
@@ -838,6 +838,8 @@ function update(){
     player.dashTimer--;
     player.vx=player.dashVx;
     if(player.dashVy<0) player.vy=player.dashVy; // 上衝：對抗重力鎖定速度
+    player.dashTrail.unshift({x:player.x,y:player.y,life:10,maxLife:10,isUp:player.dashVy<0});
+    if(player.dashTrail.length>6) player.dashTrail.pop();
     if(player.dashTimer%2===0){
       const isUp=player.dashVy<0;
       const tx=player.dashVx>0?player.x:player.x+player.w;
@@ -849,6 +851,8 @@ function update(){
         life:9, c:isUp?'#ffd24a':'#5ad6ff'});
     }
   }
+  player.dashTrail.forEach(t=>t.life--);
+  player.dashTrail=player.dashTrail.filter(t=>t.life>0);
 
   const accel=0.62,maxv=2.7;
   if(player.dashTimer<=0){
@@ -1364,6 +1368,22 @@ function drawGun(cx,gy,f,rw){ X.save(); X.translate(cx,gy); if(f<0)X.scale(-1,1)
     X.fillStyle='#4a6a80'; X.fillRect(5,3,8,4); } // 彈匣
   X.restore(); }
 
+function drawDashTrail(){
+  if(!player.dashTrail.length) return;
+  player.dashTrail.forEach(t=>{
+    const a=(t.life/t.maxLife)*0.5;
+    const col=t.isUp?'#ffd24a':'#5ad6ff';
+    X.save();
+    // outer glow
+    X.globalAlpha=a*0.35;
+    X.fillStyle=col;
+    X.fillRect(t.x-camX-3,t.y-3,player.w+6,player.h+6);
+    // inner silhouette
+    X.globalAlpha=a;
+    X.fillRect(t.x-camX,t.y,player.w,player.h);
+    X.restore();
+  });
+}
 function drawMarine(){
   const p=player; if(p.inv>0&&p.blessing<=0&&Math.floor(p.inv/4)%2===0)return;
   const _exOY=state==='EXTRACT'&&extractPhase>=2?extractPlayerOY:0;
@@ -2111,7 +2131,7 @@ function startGame(){
   victoryWaitingNext=false;
   score=0; player.hp=player.maxhp=100; player.shield=0; player.energy=0;
   player.rw=0; player.mw=0; player.rlvl=[1,1,1,1,1]; player.mlvl=[1,1,1]; player.blessing=0; player.inv=0;
-  player.chargeTimer=0;
+  player.chargeTimer=0; player.dashTrail=[];
   player.meleeDmgMult=1; player.dashDmgMult=1; player.dmgMult=1; player.maxShield=60; player.maxEnergy=100;
   player.dashCDMax=52; player.diveReady=false; player.diving=false; player.diveHits=null;
   LEGIONS[selLegion].apply(player);
@@ -2614,8 +2634,8 @@ function loop(){
   else if(state==='SELECT'){ drawSelect(); }
   else if(state==='LEADERBOARD'){ drawLeaderboardScreen(); }
   else if(state==='CAMP'){ drawCamp(); if(paused)drawPauseOverlay(); }
-  else if(state==='EXTRACT'){ drawBackground(); drawPlatforms(); drawParticles(); drawShockwaves(); drawExtractionZone(); drawShip(); drawAlly(); drawMarine(); drawExtractHUD(); if(paused)drawPauseOverlay(); }
-  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); if(isSpecialLevel)drawTower(); if(isSpecialLevel)drawAlly(); drawMarine(); drawParticles(); drawShockwaves(); drawHUD();
+  else if(state==='EXTRACT'){ drawBackground(); drawPlatforms(); drawParticles(); drawShockwaves(); drawExtractionZone(); drawShip(); drawAlly(); drawDashTrail(); drawMarine(); drawExtractHUD(); if(paused)drawPauseOverlay(); }
+  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); if(isSpecialLevel)drawTower(); if(isSpecialLevel)drawAlly(); drawDashTrail(); drawMarine(); drawParticles(); drawShockwaves(); drawHUD();
     if(paused&&playing)drawPauseOverlay();
     if(state==='GAMEOVER')drawGameOver(); if(state==='VICTORY')drawVictory(); }
   requestAnimationFrame(loop);
