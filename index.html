@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="為了帝皇">
 <meta name="theme-color" content="#05060a">
-<meta name="build" content="2026.05.31.2">
+<meta name="build" content="2026.06.03.1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
@@ -37,6 +37,7 @@
   /* weapon swap: small, upper area of right cluster */
   #btn-swR    { right:122px; bottom:140px; width:46px; height:46px; background:rgba(180,120,40,.32); border:1.5px solid rgba(255,200,130,.55); font-size:11px; }
   #btn-swM    { right:190px; bottom:104px; width:46px; height:46px; background:rgba(180,120,40,.32); border:1.5px solid rgba(255,200,130,.55); font-size:11px; }
+  #btn-dash   { right:44px;  bottom:182px; width:58px; height:58px; background:rgba(30,120,200,.36); border:1.5px solid rgba(100,200,255,.65); font-size:13px; }
   /* fullscreen button */
   #fsBtn { position:fixed; top:8px; right:12%; z-index:20; pointer-events:auto;
            padding:6px 10px; font-size:12px; color:#cfe; background:rgba(20,30,50,.6);
@@ -70,8 +71,9 @@
   <div class="pad" id="btn-melee">近戰</div>
   <div class="pad" id="btn-swR">換槍</div>
   <div class="pad" id="btn-swM">換刃</div>
+  <div class="pad" id="btn-dash">衝刺</div>
 </div>
-<div id="hint">PC: ←→移動 ↑/W/空白跳 J射擊 K近戰 U換遠程 I換近戰　(空白鍵若卡住請用 ↑ 跳)</div>
+<div id="hint">PC: ←→移動 ↑/W/空白跳 J射擊 K近戰 Y衝刺 U換遠程 I換近戰</div>
 
 <script>
 //============================================================
@@ -156,10 +158,11 @@ if(isMobile){ document.getElementById('touch').style.display='block'; document.g
   document.getElementById('fsBtn').style.display='block'; }
 
 // pause
-let paused=false;
+let paused=false, quitConfirm=false;
 const pauseBtn=document.getElementById('pauseBtn');
 function togglePause(){
-  if(state!=='PLAY'&&state!=='TRANS'){ return; }
+  if(state!=='PLAY'&&state!=='TRANS'&&state!=='CAMP'&&state!=='EXTRACT'){ return; }
+  if(quitConfirm){ quitConfirm=false; return; } // ESC/P 取消確認框，維持暫停
   paused=!paused;
   pauseBtn.textContent=paused?'▶':'⏸';
   if(audioReady){ if(paused){ Tone.Transport.pause(); } else { Tone.Transport.start(); } }
@@ -168,6 +171,14 @@ function togglePause(){
 }
 pauseBtn.addEventListener('click',e=>{ e.stopPropagation(); togglePause(); });
 pauseBtn.addEventListener('touchstart',e=>{ e.stopPropagation(); e.preventDefault(); togglePause(); },{passive:false});
+function quitToTitle(){
+  quitConfirm=false; paused=false; pauseBtn.textContent='⏸';
+  keys.left=keys.right=keys.jump=keys.fire=keys.melee=keys.dash=false;
+  stopMusic();
+  bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
+  boss=null;bossIntro=0;victoryParts=[];
+  state='TITLE';
+}
 
 // fullscreen + orientation lock
 const fsBtn=document.getElementById('fsBtn');
@@ -186,11 +197,14 @@ fsBtn.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); tog
   document.addEventListener(ev,()=>{ fsBtn.textContent=isFs()?'⛶ 離開':'⛶ 全螢幕'; setTimeout(resize,250); }));
 
 //------------------------ INPUT -----------------------------
-const keys={left:false,right:false,jump:false,fire:false,melee:false,swR:false,swM:false};
+const keys={left:false,right:false,jump:false,fire:false,melee:false,swR:false,swM:false,dash:false};
 const kmap={ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',
-  ArrowUp:'jump',KeyW:'jump',Space:'jump',KeyJ:'fire',KeyK:'melee',KeyU:'swR',KeyI:'swM',Enter:'start',KeyP:'pause',Escape:'pause'};
+  ArrowUp:'jump',KeyW:'jump',Space:'jump',KeyJ:'fire',KeyK:'melee',KeyU:'swR',KeyI:'swM',KeyY:'dash',KeyL:'lb',KeyQ:'quit',Enter:'start',KeyP:'pause',Escape:'pause'};
 addEventListener('keydown',e=>{ const k=kmap[e.code]; if(k){ e.preventDefault();
-  if(k==='start'){ if(state==='SELECT')confirmSelect(); else gotoSelect(); return;}
+  if(state==='LEADERBOARD'){ gotoTitle(); return; }
+  if(k==='lb'){ if(state==='TITLE') gotoLeaderboard(); return; }
+  if(k==='quit'){ if(paused){ if(quitConfirm) quitToTitle(); else quitConfirm=true; } return; }
+  if(k==='start'){ if(state==='SELECT')confirmSelect(); else if(victoryWaitingNext){victoryWaitingNext=false;titleT=600;}else gotoSelect(); return;}
   if(k==='pause'){ togglePause(); return; }
   if(k==='swR'&&!keys.swR)cycleRanged();
   if(k==='swM'&&!keys.swM)cycleMelee();
@@ -201,6 +215,8 @@ addEventListener('keydown',e=>{
   if(state!=='SELECT')return;
   if(e.code==='ArrowLeft'||e.code==='KeyA'){ selLegion=(selLegion+LEGIONS.length-1)%LEGIONS.length; sfx('E5'); }
   else if(e.code==='ArrowRight'||e.code==='KeyD'){ selLegion=(selLegion+1)%LEGIONS.length; sfx('E5'); }
+  else if(e.code==='ArrowUp'||e.code==='ArrowDown'||e.code==='Tab'||e.code==='KeyS'||e.code==='KeyW'){
+    selMission=(selMission+1)%2; sfx('E5'); e.preventDefault(); }
 });
 function bindBtn(id,key,onPress){ const el=document.getElementById(id);
   const dn=e=>{e.preventDefault();keys[key]=true;if(onPress)onPress();};
@@ -211,8 +227,40 @@ function bindBtn(id,key,onPress){ const el=document.getElementById(id);
 bindBtn('dpad-left','left'); bindBtn('dpad-right','right');
 bindBtn('btn-jump','jump'); bindBtn('btn-fire','fire'); bindBtn('btn-melee','melee');
 bindBtn('btn-swR','swR',cycleRanged); bindBtn('btn-swM','swM',cycleMelee);
-CV.addEventListener('click',e=>{ if(state==='SELECT')selectClick(e); else if(state==='TITLE'||state==='GAMEOVER'||state==='VICTORY')gotoSelect(); });
-CV.addEventListener('touchstart',e=>{ if(state==='SELECT'){e.preventDefault();selectClick(e.touches[0]);} else if(state==='TITLE'||state==='GAMEOVER'||state==='VICTORY'){e.preventDefault();gotoSelect();} });
+bindBtn('btn-dash','dash');
+function titleAreaClick(pt){
+  const rect=CV.getBoundingClientRect();
+  const iy=(pt.clientY-rect.top)/rect.height*VH;
+  if(iy>=208) gotoLeaderboard(); else gotoSelect();
+}
+function pauseAreaClick(pt){
+  const rect=CV.getBoundingClientRect();
+  const ix=(pt.clientX-rect.left)/rect.width*VW;
+  const iy=(pt.clientY-rect.top)/rect.height*VH;
+  if(!quitConfirm){
+    // 點擊離開按鈕 → 進入確認
+    if(iy>=VH/2+28 && iy<=VH/2+54) quitConfirm=true;
+  } else {
+    // 確認框：左半=確認離開，右半=取消
+    if(iy>=VH/2+2 && iy<=VH/2+34){
+      if(ix<VW/2) quitToTitle(); else quitConfirm=false;
+    }
+  }
+}
+CV.addEventListener('click',e=>{
+  if(paused){ pauseAreaClick(e); return; }
+  if(state==='SELECT') selectClick(e);
+  else if(state==='LEADERBOARD') gotoTitle();
+  else if(state==='TITLE') titleAreaClick(e);
+  else if(state==='GAMEOVER'||state==='VICTORY'){ if(victoryWaitingNext){victoryWaitingNext=false;titleT=600;}else gotoSelect(); }
+});
+CV.addEventListener('touchstart',e=>{
+  if(paused){e.preventDefault();pauseAreaClick(e.touches[0]);return;}
+  if(state==='SELECT'){e.preventDefault();selectClick(e.touches[0]);}
+  else if(state==='LEADERBOARD'){e.preventDefault();gotoTitle();}
+  else if(state==='TITLE'){e.preventDefault();titleAreaClick(e.touches[0]);}
+  else if(state==='GAMEOVER'||state==='VICTORY'){e.preventDefault();if(victoryWaitingNext){victoryWaitingNext=false;titleT=600;}else gotoSelect();}
+});
 
 //------------------------ AUDIO -----------------------------
 let audioReady=false, musicMode='none';
@@ -328,7 +376,7 @@ async function initAudio(){
   stageTracks=STAGE_SONGS.map(buildTrack);
   bossTrack=buildTrack(BOSS_SONG); menuTrack=buildMenuTrack();
   musicLoop=new Tone.Loop(time=>{
-    let track; if(musicMode==='boss')track=bossTrack; else if(musicMode==='stage')track=stageTracks[level]||stageTracks[0]; else if(musicMode==='menu')track=menuTrack; else return;
+    let track; if(musicMode==='boss')track=bossTrack; else if(musicMode==='stage')track=stageTracks[Math.min(level,4)]||stageTracks[0]; else if(musicMode==='menu')track=menuTrack; else return;
     if(!track)return;
     const st=track[mStep%track.length];
     try{
@@ -387,7 +435,7 @@ function deathSfx(){ if(!audioReady)return; try{
 //------------------------ WEAPONS ---------------------------
 const RANGED=[
   {name:'爆彈槍 BOLTER', color:'#ffd24a',speed:6.5,dmg:14,rate:14,cnt:1,spread:0,pierce:false,sz:5,snd:'C5'},
-  {name:'火焰槍 FLAMER', color:'#ff7a1a',speed:4.2,dmg:7, rate:5, cnt:1,spread:0.18,pierce:false,sz:7,life:26,snd:'E4'},
+  {name:'火焰槍 FLAMER', color:'#ff7a1a',speed:4.2,dmg:4, rate:5, cnt:1,spread:0.18,pierce:false,sz:7,life:26,snd:'E4'},
   {name:'電磁砲 RAILGUN',color:'#5ad6ff',speed:11, dmg:34,rate:34,cnt:1,spread:0,pierce:true,sz:6,snd:'A5'},
   {name:'槍榴彈 GRENADE',color:'#a8e063',speed:4.4,dmg:40,rate:60,cnt:1,spread:0,pierce:false,sz:7,snd:'G3',lob:true,blast:46}
 ];
@@ -399,6 +447,16 @@ const MELEE=[
 ];
 const MELEE_DUR=14;
 
+//------------------------ CAMP (關卡間補給站) ----------------
+const CAMP_SHOPS=[
+  {x:95,  name:'急救站', en:'MEDIC',  icon:'HP', cost:500,  col:'#e23a3a', desc:'+50 HP',       apply:p=>{p.hp=Math.min(p.maxhp,p.hp+50);}},
+  {x:185, name:'護盾站', en:'SHIELD', icon:'盾',  cost:400,  col:'#5ad6ff', desc:'護盾+40',      apply:p=>{p.shield=Math.min(60,p.shield+40);}},
+  {x:275, name:'武器庫', en:'ARMORY', icon:'武',  cost:900,  col:'#ffd24a', desc:'遠程武器升一級', apply:p=>{if(p.rlvl[p.rw]<5){p.rlvl[p.rw]++;flashMsg('武器升級! Lv'+p.rlvl[p.rw]);sfx('C6','8n');}else if(p.mlvl[p.mw]<5){p.mlvl[p.mw]++;flashMsg('近戰升級! Lv'+p.mlvl[p.mw]);sfx('C6','8n');}}},
+  {x:365, name:'能量站', en:'ENERGY', icon:'能',  cost:300,  col:'#ffd24a', desc:'能量+70',      apply:p=>{p.energy=Math.min(100,p.energy+70);checkUpgrade();}},
+];
+const CAMP_EXIT_X=432;
+let campT=0, campShopMsg='', campMsgTime=0, campAirFight=[];
+
 //------------------------ STATE -----------------------------
 let state='TITLE', level=0, levelTimer=0, transTimer=0;
 const GROUND=VH-34; let camX=0;
@@ -407,10 +465,11 @@ const BOSSES=[
   {name:'裂顎屠夫 RENDCLAW BUTCHER',    col:'#c43d2e',hp:8000},
   {name:'瘟疫宿主 PLAGUEBOUND HERALD',  col:'#6db33f',hp:13600},
   {name:'影刃潛獵者 SHADOWBLADE STALKER',col:'#5a4f9e',hp:24500},
-  {name:'吞星巢皇 STARSUNDER HIVE-TYRANT',col:'#d44',hp:44000}
+  {name:'吞星巢皇 STARSUNDER HIVE-TYRANT',col:'#d44',hp:44000},
+  {name:'焦血毀滅者 BLOODCRUSHER OVERLORD',col:'#c84010',hp:24000}
 ];
 const LV_TINT=['#1a1228','#241018','#101e12','#0e1226','#2a0810'];
-const LV_LEN=[7800,10140,11660,13410,15420];
+const LV_LEN=[7800,10140,11660,13410,15420,12000];
 
 // per-level visual theme
 const THEMES=[
@@ -423,35 +482,63 @@ const THEMES=[
   {name:'暗影夜戰 SHADOW NIGHT', sky:['#05060f','#10162e','#02030a'], ground:'#14182a', groundDark:'#0a0e1c',
    horizon:'rgba(80,90,200,0.28)', atm:'rain', atmCol:'#8af', deco:'night'},
   {name:'巢皇巢穴 HIVE SANCTUM', sky:['#1a0408','#48101a','#10040a'], ground:'#3a1020', groundDark:'#260a14',
-   horizon:'rgba(220,40,60,0.40)', atm:'spore', atmCol:'#f6a', deco:'hive'}
+   horizon:'rgba(220,40,60,0.40)', atm:'spore', atmCol:'#f6a', deco:'hive'},
+  {name:'蟲族侵攻 TYRANID ASSAULT', sky:['#0c0810','#200c2e','#060414'], ground:'#2a1818', groundDark:'#1a0e10',
+   horizon:'rgba(180,60,200,0.32)', atm:'spore', atmCol:'#c8a', deco:'hive'}
 ];
 let atmParts=[];
 
 const player={x:60,y:GROUND-44,w:26,h:44,vx:0,vy:0,onGround:true,face:1,
   hp:100,maxhp:100,shield:0,rw:0,mw:0,rlvl:[1,1,1,1],mlvl:[1,1,1],
-  fireCD:0,meleeCD:0,meleeAnim:0,energy:0,inv:0,blessing:0,walk:0};
-let bullets=[],ebullets=[],enemies=[],drops=[],particles=[],platforms=[],pools=[];
+  fireCD:0,meleeCD:0,meleeAnim:0,energy:0,inv:0,blessing:0,walk:0,dashCD:0,dashTimer:0,dashVx:0,dashVy:0,dashHits:null,
+  meleeDmgMult:1,dashDmgMult:1,dmgMult:1,maxShield:60,maxEnergy:100,
+  dashCDMax:52,diveReady:false,diving:false,diveHits:null};
+let bullets=[],ebullets=[],enemies=[],drops=[],particles=[],platforms=[],pools=[],shockwaves=[];
 let boss=null,bossIntro=0,score=0;
-let bgStars=[],bgBuildings=[],bgFarFight=[],satellites=[];
+let bgStars=[],bgBuildings=[],bgFarFight=[],satellites=[],bgSpecialSwarm=[];
+let victoryParts=[];
 
 function cycleRanged(){ if(state!=='PLAY')return; player.rw=(player.rw+1)%RANGED.length; sfx('G5'); }
 function cycleMelee(){ if(state!=='PLAY')return; player.mw=(player.mw+1)%3; sfx('D5'); }
 
 // ----- 軍團 / 角色選擇 -----
 const LEGIONS=[
-  {name:'極限戰士', en:'ULTRAMARINES',  hero:'提圖斯 TITUS',      color:'#2f5fb0', trim:'#e8c43a', perk:'堅毅 — 最大生命 +30',      apply:p=>{ p.maxhp=130; p.hp=130; }},
-  {name:'血天使',   en:'BLOOD ANGELS',  hero:'但丁 DANTE',        color:'#b3252b', trim:'#ffd24a', perk:'狂怒 — 近戰起始 Lv3',      apply:p=>{ p.mlvl=[3,1,1]; p.mw=0; }},
-  {name:'太空野狼', en:'SPACE WOLVES',  hero:'羅根 LOGAN',        color:'#7d93ad', trim:'#e8e2d0', perk:'狼護 — 護盾+60 生命+10',   apply:p=>{ p.shield=60; p.maxhp=110; p.hp=110; }},
-  {name:'暗黑天使', en:'DARK ANGELS',   hero:'以西結 EZEKIEL',    color:'#1f6b46', trim:'#cdb86a', perk:'死亡使者 — 爆彈槍起始 Lv3', apply:p=>{ p.rlvl=[3,1,1,1]; p.rw=0; }},
-  {name:'帝國之拳', en:'IMPERIAL FISTS',hero:'利西克斯 LYSANDER', color:'#e0a92b', trim:'#fff0c0', perk:'攻城 — 電磁砲Lv2 能量+50',  apply:p=>{ p.rlvl=[1,1,2,1]; p.rw=2; p.energy=50; }}
+  {name:'極限戰士', en:'ULTRAMARINES',  hero:'提圖斯 TITUS',      color:'#2f5fb0', trim:'#e8c43a', perk:'堅毅 — 最大生命 +65',        apply:p=>{ p.maxhp=165; p.hp=165; }},
+  {name:'血天使',   en:'BLOOD ANGELS',  hero:'但丁 DANTE',        color:'#b3252b', trim:'#ffd24a', perk:'狂怒 — 近戰+50% 上衝後[K]天罰俯衝',       apply:p=>{ p.meleeDmgMult=1.5; }},
+  {name:'太空野狼', en:'SPACE WOLVES',  hero:'羅根 LOGAN',        color:'#7d93ad', trim:'#e8e2d0', perk:'狼護 — 護盾+30 血量+10 傷害+10%', apply:p=>{ p.maxShield=90; p.maxhp=110; p.hp=110; p.dmgMult=1.1; }},
+  {name:'暗黑天使', en:'DARK ANGELS',   hero:'以西結 EZEKIEL',    color:'#1f6b46', trim:'#cdb86a', perk:'暗影 — 衝刺傷害+50% CD-50%',  apply:p=>{ p.dashDmgMult=1.5; p.dashCDMax=26; }},
+  {name:'帝國之拳', en:'IMPERIAL FISTS',hero:'利西克斯 LYSANDER', color:'#e0a92b', trim:'#fff0c0', perk:'攻城 — 最大能量+40 血量+20', apply:p=>{ p.maxEnergy=140; p.maxhp=120; p.hp=120; }}
 ];
 let selLegion=0;
+let selMission=0; // 0=正常五關, 1=特殊任務
+let isSpecialLevel=false;
+let victoryWaitingNext=false; // 特殊任務勝利畫面等玩家確認才跳Phase3
+// 撤離序列狀態
+let extractPhase=0;   // 0=走向撤離點 1=飛船降臨 2=吊升 3=飛離
+let extractTimer=0;
+let extractZoneX=0;   // 撤離點世界座標
+let extractPlayerOY=0, extractAllyOY=0; // 上升偏移
+let shipSX=0, shipSY=0; // 飛船世界座標
+let relayTower=null; // {x,y,hp,maxhp,timer,active,done}
+let ally=null;       // AI極限戰士同伴
+let specialWaveCD=0;
+let specialWaveCount=0;    // 已生成的防守波次敵人數
+let specialEnemiesKilled=0; // 已擊殺的防守波次敵人數
+const SPECIAL_DEFENSE_X=5200;  // 觸發塔防的玩家X座標
+const SPECIAL_DEFENSE_DUR=1800; // 30秒 @60fps
 function gotoSelect(){ initAudio(); state='SELECT'; }
+function gotoTitle(){ state='TITLE'; }
+function gotoLeaderboard(){ initAudio(); titleT=0; state='LEADERBOARD'; }
 function confirmSelect(){ if(!audioReady)initAudio().then(startGame); else startGame(); } // startGame 內套用所選軍團
 function selectClick(pt){
   const rect=CV.getBoundingClientRect();
   const ix=(pt.clientX-rect.left)/rect.width*VW, iy=(pt.clientY-rect.top)/rect.height*VH;
-  if(iy>=216 && iy<=246 && ix>=VW/2-90 && ix<=VW/2+90){ confirmSelect(); return; } // 確認出戰按鈕
+  if(iy>=222 && iy<=252 && ix>=VW/2-90 && ix<=VW/2+90){ confirmSelect(); return; } // 確認出戰按鈕
+  // 任務選擇按鈕
+  if(iy>=203 && iy<=217){
+    if(ix>=VW/2-112 && ix<=VW/2-4){ selMission=0; sfx('E5'); return; }
+    if(ix>=VW/2+4   && ix<=VW/2+112){ selMission=1; sfx('E5'); return; }
+  }
   for(let i=0;i<LEGIONS.length;i++){ const x=19+i*90;
     if(ix>=x && ix<=x+82 && iy>=44 && iy<=194){ if(i===selLegion)confirmSelect(); else { selLegion=i; sfx('E5'); } return; } }
 }
@@ -469,7 +556,7 @@ function buildBackground(){
   for(let i=0;i<n;i++) atmParts.push({x:Math.random()*VW,y:Math.random()*GROUND,sp:0.3+Math.random()*1.2,sw:Math.random()*6.28,r:Math.random()});
 }
 function buildLevel(){
-  bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];
+  bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
   boss=null;bossIntro=0;levelTimer=0;
   player.x=60;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;
   player.hp=Math.min(player.maxhp,player.hp+25);player.inv=60;player.blessing=0;
@@ -497,16 +584,65 @@ function buildLevel(){
   stageBanner=120;
   setMusic('stage');
 }
+function buildSpecialLevel(){
+  bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
+  boss=null;bossIntro=0;levelTimer=0;relayTower=null;ally=null;specialWaveCD=0;specialWaveCount=0;specialEnemiesKilled=0;
+  player.x=60;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;
+  player.hp=Math.min(player.maxhp,player.hp+25);player.inv=60;player.blessing=0;
+  camX=0;
+  buildBackground(); // uses THEMES[5] = 蟲族侵攻
+  // 特殊背景蟲群
+  bgSpecialSwarm=[];
+  for(let i=0;i<90;i++) bgSpecialSwarm.push({x:Math.random()*VW*2,y:8+Math.random()*95,t:Math.random()*6.28,spd:0.15+Math.random()*0.4,sz:0.6+Math.random()*1.6});
+  // 平台
+  const len=LV_LEN[5]; let pxp=200;
+  while(pxp<len-300){
+    const tier=Math.floor(Math.random()*3), py=GROUND-(36+tier*26), pw=46+Math.floor(Math.random()*3)*22;
+    platforms.push({x:pxp,y:py,w:pw});
+    if(Math.random()<.4) platforms.push({x:pxp+pw+34,y:py-34,w:46});
+    pxp+=130+Math.random()*160;
+  }
+  const _sr=(s,w)=>{ const r=Math.random(); let tp;
+    if(r<0.08)tp='brute'; else{const r2=Math.random();tp=r2<.38?'crawler':r2<.62?'upright':r2<.80?'infected':r2<.92?'spitter':'flyer';}
+    spawnEnemy(tp, s+Math.random()*w, GROUND); };
+  // 前半段（起點 → 塔防前）
+  for(let i=0;i<Math.round((SPECIAL_DEFENSE_X-560)/40);i++) _sr(260, SPECIAL_DEFENSE_X-560);
+  // 後半段（塔防後 → 關卡末，同等密度）
+  const postW=len-SPECIAL_DEFENSE_X-1200;
+  for(let i=0;i<Math.round(postW/40);i++) _sr(SPECIAL_DEFENSE_X+600, postW);
+  window._bossSpawned=false;
+  stageBanner=160;
+  // 同伴：極限戰士
+  ally={x:110,y:GROUND-44,vx:0,vy:0,hp:400,maxhp:400,face:1,onGround:true,
+        fireCD:0,meleeCD:0,meleeAnim:0,walk:0,inv:0,t:0,alive:true,respawnTimer:0};
+  setMusic('stage');
+}
+function buildCamp(){
+  bullets=[];ebullets=[];enemies=[];drops=[];pools=[];boss=null;bossIntro=0;
+  campT=0;campShopMsg='';campMsgTime=0;
+  player.x=30;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;player.face=1;
+  player.fireCD=35;player.meleeCD=0;player.meleeAnim=0;player.inv=30;
+  player.diveReady=false;player.diving=false;player.diveHits=null;
+  player.hp=Math.min(player.maxhp,player.hp+30); // 過關獎勵小量補血
+  camX=0;
+  campAirFight=[];
+  for(let i=0;i<12;i++) campAirFight.push({
+    x:Math.random()*VW, y:10+Math.random()*65,
+    vx:(Math.random()<0.5?1:-1)*(0.5+Math.random()*1.1),
+    t:Math.random()*6.28, human:i%2===0, explode:0 });
+  if(audioReady) setMusic('menu');
+  state='CAMP';
+}
 let stageBanner=0;
-const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33]; // per-stage: +10%,+10% then +5%,+5%
+const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27]; // per-stage; index 5 = special mission
 function spawnEnemy(type,x,g){
   const b={x:x,y:0,vx:0,vy:0,type:type,hitFlash:0,t:Math.random()*6,dead:false};
-  if(type==='crawler'){ Object.assign(b,{w:30,h:18,hp:42,dmg:10,spd:0.7,touch:true}); }
-  else if(type==='upright'){ Object.assign(b,{w:24,h:36,hp:84,dmg:14,spd:0.95,touch:true}); }
-  else if(type==='infected'){ Object.assign(b,{w:22,h:34,hp:56,dmg:12,spd:0.5,touch:true}); }
-  else if(type==='spitter'){ Object.assign(b,{w:32,h:32,hp:110,dmg:16,spd:0.3,touch:false,shootCD:60+Math.random()*60}); }
-  else if(type==='brute'){ Object.assign(b,{w:48,h:54,hp:320,dmg:22,spd:0.42,touch:true,shootCD:120+Math.random()*80,stomp:0}); }
-  else if(type==='flyer'){ Object.assign(b,{w:30,h:22,hp:30,dmg:12,spd:1.0,touch:true,
+  if(type==='crawler'){ Object.assign(b,{w:30,h:18,hp:61,dmg:16,spd:0.7,touch:true}); }
+  else if(type==='upright'){ Object.assign(b,{w:24,h:36,hp:121,dmg:22,spd:0.95,touch:true}); }
+  else if(type==='infected'){ Object.assign(b,{w:22,h:34,hp:81,dmg:18,spd:0.5,touch:true}); }
+  else if(type==='spitter'){ Object.assign(b,{w:32,h:32,hp:159,dmg:24,spd:0.3,touch:false,shootCD:60+Math.random()*60}); }
+  else if(type==='brute'){ Object.assign(b,{w:48,h:54,hp:460,dmg:33,spd:0.42,touch:true,shootCD:120+Math.random()*80,stomp:0}); }
+  else if(type==='flyer'){ Object.assign(b,{w:30,h:22,hp:44,dmg:18,spd:1.0,touch:true,
       flyBase:55+Math.random()*70, bobAmp:16+Math.random()*16, bobSp:0.04+Math.random()*0.03,
       shootCD:90+Math.random()*70, swoop:0, wing:Math.random()*6.28}); }
   const m=ENEMY_HP_MULT[level]||1; b.hp=Math.round(b.hp*m); b.maxhp=b.hp;
@@ -516,7 +652,8 @@ function spawnEnemy(type,x,g){
 function spawnBoss(){
   const b=BOSSES[level];
   boss={x:camX+VW-100,y:GROUND-100,w:80,h:80,hp:b.hp,maxhp:b.hp,name:b.name,col:b.col,
-        t:0,phase:0,shootCD:60,hitFlash:0,baseY:GROUND-100,level:level,tele:0,charge:0,dashV:0};
+        t:0,phase:0,shootCD:60,hitFlash:0,baseY:GROUND-100,level:level,tele:0,charge:0,dashV:0,
+        ultCD:480,ultWind:0};
   bossIntro=140; setMusic('boss');
 }
 
@@ -526,7 +663,7 @@ function fireRanged(){
   if(player.fireCD>0)return;
   if(player.rw===3){ // grenade: special rate table + lobbed projectile
     player.fireCD=GRENADE_RATE[lvl-1]||16;
-    const dmg=w.dmg*(1+(lvl-1)*0.35)*(player.blessing>0?2:1);
+    const dmg=w.dmg*(1+(lvl-1)*0.35)*(player.blessing>0?2:1)*player.dmgMult;
     const blast=w.blast*(1+(lvl-1)*0.15);
     const ox=player.x+player.w/2+player.face*18, oy=player.y+12;
     bullets.push({x:ox,y:oy,vx:player.face*w.speed,vy:-4.2,grav:0.16,dmg:dmg,sz:w.sz,color:w.color,pierce:false,life:96,kind:3,blast:blast});
@@ -535,7 +672,7 @@ function fireRanged(){
     return;
   }
   player.fireCD=Math.max(4,w.rate-(lvl-1)*2);
-  const dmg=w.dmg*(1+(lvl-1)*0.35)*(player.blessing>0?2:1);
+  const dmg=w.dmg*(1+(lvl-1)*0.35)*(player.blessing>0?2:1)*player.dmgMult;
   const cnt=(player.rw===1)?1+lvl:w.cnt+(lvl>=3?1:0);
   const ox=player.x+player.w/2+player.face*22, oy=player.y+17;
   for(let i=0;i<cnt;i++){
@@ -557,7 +694,7 @@ function doMelee(){
   const w=MELEE[player.mw],lvl=player.mlvl[player.mw];
   if(player.meleeCD>0)return;
   player.meleeCD=w.rate; player.meleeAnim=MELEE_DUR;
-  const dmg=w.dmg*(1+(lvl-1)*0.4)*(player.blessing>0?2:1);
+  const dmg=w.dmg*(1+(lvl-1)*0.4)*(player.blessing>0?2:1)*player.meleeDmgMult*player.dmgMult;
   const hx=player.face>0?player.x+player.w:player.x-w.reach;
   const box={x:hx,y:player.y+(player.h-w.h)/2,w:w.reach,h:w.h};
   let hit=false;
@@ -566,8 +703,33 @@ function doMelee(){
   if(boss&&!bossIntro&&aabb(box,boss)){ damageBoss(dmg); hit=true; }
   sfx(player.mw===1?'C3':'E4','16n'); if(hit)sfx('A2','32n');
 }
+function startDive(){
+  player.diveReady=false; player.diving=true;
+  player.vy=14; player.vx*=0.2;
+  player.diveHits=new Set(); player.inv=Math.max(player.inv,8);
+  sfx('E2','8n');
+  for(let i=0;i<16;i++) particles.push({x:player.x+Math.random()*26,y:player.y+Math.random()*44,vx:(Math.random()-.5)*4,vy:Math.random()*3+1,life:14,c:i%2?'#e23a3a':'#ffd24a'});
+}
+function diveImpact(){
+  const cx=player.x+player.w/2, cy=player.y+player.h;
+  const dmg=Math.round(250*player.meleeDmgMult); // +25%
+  enemies.forEach(e=>{ if(!e.dead&&!(player.diveHits&&player.diveHits.has(e))&&Math.abs(e.x+e.w/2-cx)<90){
+    damageEnemy(e,dmg); e.vx+=Math.sign(e.x+e.w/2-cx)*5;
+  }});
+  if(boss&&!bossIntro&&!(player.diveHits&&player.diveHits.has(boss))&&Math.abs(boss.x+boss.w/2-cx)<90) damageBoss(dmg);
+  // 爆炸粒子
+  for(let i=0;i<36;i++) particles.push({x:cx+(Math.random()-.5)*90,y:cy-2,vx:(Math.random()-.5)*12,vy:-Math.random()*9-1,life:28,c:i%3===0?'#ffd24a':i%3===1?'#e23a3a':'#ff8040'});
+  // 橫向地面碎片
+  for(let i=0;i<12;i++) particles.push({x:cx+(Math.random()-.5)*30,y:cy,vx:(i%2?1:-1)*(4+Math.random()*7),vy:-Math.random()*3,life:18,c:'#c84'});
+  // 震波圓環（三層，速度與顏色各異）
+  shockwaves.push({x:cx,y:cy, r:12, spd:9, maxR:110, a:1.0, w:3, c:'#e23a3a'});
+  shockwaves.push({x:cx,y:cy, r:6,  spd:7, maxR:85,  a:0.8, w:2, c:'#ffd24a'});
+  shockwaves.push({x:cx,y:cy, r:2,  spd:5, maxR:60,  a:0.6, w:4, c:'#ff8040'});
+  sfx('C2','8n'); sfx('E3','32n'); player.diveHits=null;
+}
 function damageEnemy(e,dmg){ e.hp-=dmg; e.hitFlash=6;
   if(e.hp<=0&&!e.dead){ e.dead=true;
+    if(e.waveEnemy) specialEnemiesKilled++;
     const isBrute=e.type==='brute';
     score+=isBrute?500:100; player.energy+=isBrute?40:8;
     const n=isBrute?20:10; for(let i=0;i<n;i++)particles.push({x:e.x+e.w/2,y:e.y+e.h/2,vx:(Math.random()-.5)*(isBrute?7:5),vy:(Math.random()-.5)*(isBrute?7:5),life:isBrute?26:16,c:isBrute?'#fc6':'#8f4'});
@@ -581,21 +743,33 @@ function damageBoss(dmg){ boss.hp-=dmg; boss.hitFlash=5; score+=10;
   for(let i=0;i<4;i++)particles.push({x:boss.x+Math.random()*boss.w,y:boss.y+Math.random()*boss.h,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,life:14,c:boss.col});
   if(boss.hp<=0)defeatBoss(); }
 function defeatBoss(){ score+=2000;
-  for(let i=0;i<40;i++)particles.push({x:boss.x+Math.random()*boss.w,y:boss.y+Math.random()*boss.h,vx:(Math.random()-.5)*7,vy:(Math.random()-.5)*7,life:40,c:i%2?'#ffd24a':boss.col});
+  const _bx=boss.x, _bw=boss.w, _bc=boss.col;
+  for(let i=0;i<40;i++)particles.push({x:_bx+Math.random()*_bw,y:boss.y+Math.random()*boss.h,vx:(Math.random()-.5)*7,vy:(Math.random()-.5)*7,life:40,c:i%2?'#ffd24a':_bc});
   sfx('C6','2n'); boss=null;
-  drops.push({x:player.x+40,y:GROUND-20,vy:-3,type:'blessing',t:0}); transTimer=160; state='TRANS'; }
+  if(isSpecialLevel){
+    if(ally&&!ally.alive){ ally.alive=true; ally.hp=Math.floor(ally.maxhp/2); ally.respawnTimer=0; ally.x=player.x-55; ally.y=GROUND-44; ally.inv=60; }
+    extractPhase=0; extractTimer=0;
+    extractZoneX=_bx+_bw+320;
+    extractPlayerOY=0; extractAllyOY=0;
+    shipSX=0; shipSY=-100;
+    enemies=[]; drops=[]; ebullets=[]; pools=[];
+    flashMsg('前往撤離點！'); sfx('C5','4n');
+    if(audioReady) setMusic('menu');
+    state='EXTRACT'; return;
+  }
+  buildCamp(); }
 function maybeDrop(x,y){ const r=Math.random(); let type=null;
   if(r<0.16)type='hp'; else if(r<0.26)type='energy'; else if(r<0.34)type='shield';
   else if(r<0.42)type='wchip'; else if(r<0.47)type='ammo'; else if(r<0.485)type='blessing';
   if(type)drops.push({x:x,y:y,vy:-2.5,type:type,t:0}); }
-function checkUpgrade(){ if(player.energy>=100){ player.energy-=100;
+function checkUpgrade(){ if(player.energy>=player.maxEnergy){ player.energy-=player.maxEnergy;
   if(player.rlvl[player.rw]<5){ player.rlvl[player.rw]++; flashMsg('遠程武器升級! LV'+player.rlvl[player.rw]); sfx('C6','8n'); }
   else if(player.mlvl[player.mw]<5){ player.mlvl[player.mw]++; flashMsg('近戰武器升級! LV'+player.mlvl[player.mw]); sfx('C6','8n'); } } }
 let msgText='',msgTime=0; function flashMsg(t){ msgText=t; msgTime=90; }
 function pickupDrop(d){ switch(d.type){
     case 'hp': player.hp=Math.min(player.maxhp,player.hp+30); flashMsg('+30 HP'); sfx('E5'); break;
     case 'energy': player.energy=Math.min(100,player.energy+40); checkUpgrade(); flashMsg('+能量'); sfx('G5'); break;
-    case 'shield': player.shield=Math.min(60,player.shield+40); flashMsg('+護盾'); sfx('A5'); break;
+    case 'shield': player.shield=Math.min(player.maxShield,player.shield+40); flashMsg('+護盾'); sfx('A5'); break;
     case 'wchip':{ const wi=Math.floor(Math.random()*RANGED.length); if(player.rlvl[wi]<5){player.rlvl[wi]++;flashMsg('武器晶片! '+RANGED[wi].name.split(' ')[0]+' LV'+player.rlvl[wi]);}else{const mi=Math.floor(Math.random()*3);player.mlvl[mi]++;flashMsg('武器晶片! 近戰升級');} sfx('C6','8n'); break; }
     case 'ammo': player.blessing=Math.max(player.blessing,180); flashMsg('彈藥強化!'); sfx('D6'); break;
     case 'blessing': player.blessing=300; player.inv=Math.max(player.inv,300); player.hp=Math.min(player.maxhp,player.hp+40); flashMsg('★ 帝皇恩賜 ★ 無敵+雙倍火力!'); sfx('C6','4n'); break;
@@ -611,25 +785,69 @@ function gameOver(){ state='GAMEOVER'; stopMusic(); deathSfx(); recordScore(fals
 //------------------------ UPDATE ----------------------------
 function update(){
   if(paused)return;
+  if(state==='CAMP'){updateCamp();return;}
+  if(state==='EXTRACT'){updateExtract();return;}
   if(state!=='PLAY'&&state!=='TRANS')return;
   const len=LV_LEN[level];
   if(state==='TRANS'){ transTimer--;
     particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;}); particles=particles.filter(p=>p.life>0);
     drops.forEach(d=>{d.t++;d.y+=d.vy;d.vy+=0.18;if(d.y>GROUND-12){d.y=GROUND-12;d.vy=0;}});
-    if(transTimer<=0){ level++; if(level>=5){ recordScore(true); state='VICTORY'; stopMusic(); return; } state='PLAY'; musicMode='none'; buildLevel(); }
+    if(transTimer<=0){ level++; if(level>=5){ recordScore(true); titleT=0; victoryParts=[]; state='VICTORY'; stopMusic(); return; } state='PLAY'; musicMode='none'; buildLevel(); }
     return;
   }
   if(player.fireCD>0)player.fireCD--; if(player.meleeCD>0)player.meleeCD--;
   if(player.meleeAnim>0)player.meleeAnim--; if(player.inv>0)player.inv--;
   if(player.blessing>0)player.blessing--; if(msgTime>0)msgTime--; if(stageBanner>0)stageBanner--; levelTimer++;
+  if(player.dashCD>0)player.dashCD--;
+
+  // 衝刺觸發（Y鍵；按跳躍同時按Y = 往上衝刺）
+  if(keys.dash && player.dashCD<=0){
+    const isUp=keys.jump; // 同時按跳躍 = 上衝
+    const hdir=keys.left?-1:keys.right?1:0;
+    const effectiveH=hdir!==0?hdir:(isUp?0:player.face); // 純上衝時可無水平分量
+    if(!isUp||hdir!==0) player.face=effectiveH||player.face;
+    player.dashCD=player.dashCDMax; player.dashTimer=isUp?10:12;
+    player.dashVx=effectiveH*(isUp?7:12);
+    player.dashVy=isUp?-11:0;
+    player.vx=player.dashVx; player.vy=player.dashVy;
+    if(isUp) player.onGround=false;
+    player.inv=Math.max(player.inv,20);
+    player.dashHits=new Set();
+    player.fireCD=Math.max(player.fireCD,player.dashTimer+8); // 強制中斷射擊
+    // 血天使：上衝後開啟天罰俯衝
+    if(isUp && selLegion===1){ player.diveReady=true; player.diveHits=new Set(); }
+    sfx('G5','32n');
+    const pcx=player.x+player.w/2, pcy=player.y+(isUp?player.h:22);
+    for(let i=0;i<12;i++) particles.push({x:pcx+(Math.random()-.5)*10,y:pcy+Math.random()*14,
+      vx:-effectiveH*4+(Math.random()-.5)*3, vy:isUp?2+Math.random()*2:(Math.random()-.5)*3,
+      life:15, c:isUp?'#ffd24a':i%2?'#5ad6ff':'#fff'});
+  }
+  // 衝刺中：鎖定速度 + 殘影粒子
+  if(player.dashTimer>0){
+    player.dashTimer--;
+    player.vx=player.dashVx;
+    if(player.dashVy<0) player.vy=player.dashVy; // 上衝：對抗重力鎖定速度
+    if(player.dashTimer%2===0){
+      const isUp=player.dashVy<0;
+      const tx=player.dashVx>0?player.x:player.x+player.w;
+      for(let i=0;i<3;i++) particles.push({
+        x:isUp?player.x+player.w/2+(Math.random()-.5)*8:tx+(Math.random()-.5)*4,
+        y:isUp?player.y+player.h-2+Math.random()*6:player.y+12+Math.random()*24,
+        vx:-player.dashVx*0.15+(Math.random()-.5)*0.8,
+        vy:isUp?2+Math.random()*2:(Math.random()-.5)*1.2,
+        life:9, c:isUp?'#ffd24a':'#5ad6ff'});
+    }
+  }
 
   const accel=0.62,maxv=2.7;
-  if(keys.left){player.vx-=accel;player.face=-1;}
-  if(keys.right){player.vx+=accel;player.face=1;}
-  if(!keys.left&&!keys.right)player.vx*=0.7;
-  player.vx=Math.max(-maxv,Math.min(maxv,player.vx));
+  if(player.dashTimer<=0){
+    if(keys.left){player.vx-=accel;player.face=-1;}
+    if(keys.right){player.vx+=accel;player.face=1;}
+    if(!keys.left&&!keys.right)player.vx*=0.7;
+    player.vx=Math.max(-maxv,Math.min(maxv,player.vx));
+  }
   if(Math.abs(player.vx)>0.3&&player.onGround)player.walk+=0.3; else player.walk*=0.6;
-  if(keys.jump&&player.onGround){ player.vy=-7.4; player.onGround=false; sfx('C5','32n'); }
+  if(keys.jump&&player.onGround&&player.dashTimer<=0){ player.vy=-7.4; player.onGround=false; sfx('C5','32n'); }
   player.vy+=0.42; if(player.vy>9)player.vy=9;
   player.x+=player.vx; player.y+=player.vy;
   if(player.x<camX+2)player.x=camX+2; if(player.x>len-40)player.x=len-40;
@@ -639,15 +857,58 @@ function update(){
   platforms.forEach(p=>{ if(player.vy>=0&&player.x+player.w>p.x+3&&player.x<p.x+p.w-3){
       const prevBottom=player.y+player.h-player.vy;
       if(prevBottom<=p.y+6&&player.y+player.h>=p.y&&player.y+player.h<=p.y+20){ player.y=p.y-player.h; player.vy=0; player.onGround=true; } } });
+  if(player.diving&&player.onGround){ player.diving=false; diveImpact(); }
+  if(player.onGround) player.diveReady=false;
 
-  if(keys.fire)fireRanged(); if(keys.melee)doMelee();
+  if(keys.fire && player.dashTimer<=0)fireRanged();
+  if(keys.melee){ if(selLegion===1&&player.diveReady&&!player.onGround&&!player.diving) startDive(); else doMelee(); }
 
   // side-scroller: camera only advances right, never scrolls back
-  const desiredCam=Math.min(len-VW,player.x-VW*0.35);
-  if(desiredCam>camX) camX+=(desiredCam-camX)*0.12;
-  if(camX<0)camX=0;
+  const _defActive=isSpecialLevel&&relayTower&&relayTower.active&&!relayTower.done;
+  if(_defActive){
+    // 塔防進行中：鎖定捲軸，限制玩家不超出右邊界
+    if(player.x>camX+VW-16)player.x=camX+VW-16;
+  } else {
+    const desiredCam=Math.min(len-VW,player.x-VW*0.35);
+    if(desiredCam>camX) camX+=(desiredCam-camX)*0.12;
+    if(camX<0)camX=0;
+  }
 
-  if(!boss&&player.x>len-VW-40&&!window._bossSpawned){ spawnBoss(); window._bossSpawned=true; }
+  if(!isSpecialLevel&&!boss&&player.x>len-VW-40&&!window._bossSpawned){ spawnBoss(); window._bossSpawned=true; }
+  // 特殊任務：觸發塔防 / 塔防完成後生 boss
+  if(isSpecialLevel){
+    if(!relayTower && player.x>SPECIAL_DEFENSE_X){
+      relayTower={x:player.x+90,y:GROUND,hp:player.maxhp*10,maxhp:player.maxhp*10,
+                  timer:SPECIAL_DEFENSE_DUR,active:true,done:false};
+      specialWaveCD=18; specialWaveCount=0; specialEnemiesKilled=0;
+      flashMsg('電磁塔已設置！守護30秒！100隻敵人來襲！'); sfx('C5','4n');
+    }
+    if(relayTower&&relayTower.active&&!relayTower.done){
+      relayTower.timer--;
+      if(relayTower.hp<=0){ relayTower.hp=0; gameOver(); return; }
+      // 成功條件：30秒守護完成
+      if(relayTower.timer<=0){ relayTower.done=true; flashMsg('守護成功！繼續前進！'); sfx('C6','4n'); }
+      // 波次生怪（從鏡頭右側），共100隻，每18幀一隻，隨機種類（無魔王）
+      specialWaveCD--;
+      if(specialWaveCD<=0 && specialWaveCount<100){
+        specialWaveCD=18; specialWaveCount++;
+        const tbl=['crawler','upright','infected','spitter','flyer','brute'];
+        const wt=[0.22,0.26,0.14,0.18,0.12,0.08]; let rr=Math.random(),tp='upright',acc=0;
+        for(let i=0;i<tbl.length;i++){acc+=wt[i];if(rr<acc){tp=tbl[i];break;}}
+        spawnEnemy(tp, camX+50+Math.random()*(VW-100), GROUND);
+        enemies[enemies.length-1].waveEnemy=true; // 標記為防守波次敵人
+      }
+      // 敵人碰塔傷害
+      enemies.forEach(e=>{
+        if(!e.dead){ if(e.towerCD>0)e.towerCD--; else if(Math.hypot(e.x+e.w/2-relayTower.x,e.y+e.h/2-(GROUND-55))<38){
+          relayTower.hp-=e.dmg*0.35; e.towerCD=36;
+          for(let k=0;k<4;k++) particles.push({x:relayTower.x+(Math.random()-.5)*10,y:GROUND-55+(Math.random()-.5)*8,vx:(Math.random()-.5)*3,vy:-Math.random()*3,life:12,c:'#5ad6ff'});
+        }}
+      });
+    }
+    // Boss 生成：守護完成後，走到關卡尾端才觸發（距離判定，和普通關卡一致）
+    if(relayTower&&relayTower.done&&!boss&&player.x>LV_LEN[5]-VW-40&&!window._bossSpawned){ spawnBoss(); window._bossSpawned=true; }
+  }
 
   bullets.forEach(b=>{ b.x+=b.vx; if(b.grav)b.vy+=b.grav; b.y+=b.vy; b.life--;
     if(b.kind===3){ // grenade: explode on enemy/boss/ground/life-end
@@ -663,7 +924,10 @@ function update(){
     if(boss&&!bossIntro&&aabb({x:b.x-b.sz/2,y:b.y-b.sz/2,w:b.sz,h:b.sz},boss)){ damageBoss(b.dmg); if(!b.pierce)b.life=0; } });
   bullets=bullets.filter(b=>b.life>0&&b.x>camX-40&&b.x<camX+VW+40);
 
-  ebullets.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; if(b.grav)b.vy+=b.grav; b.life--; if(aabb({x:b.x-3,y:b.y-3,w:6,h:6},player)){ hurtPlayer(b.dmg); b.life=0; } });
+  ebullets.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; if(b.grav)b.vy+=b.grav; b.life--;
+    if(b.acidBomb&&b.y+3>=GROUND){ pools.push({x:b.x,y:GROUND-4,r:28,life:300,dmg:0.65,c:'#7da010'});
+      for(let k=0;k<8;k++) particles.push({x:b.x,y:GROUND-4,vx:(Math.random()-.5)*5,vy:-Math.random()*4,life:16,c:'#9fa'}); b.life=0; return; }
+    if(aabb({x:b.x-3,y:b.y-3,w:6,h:6},player)){ hurtPlayer(b.dmg); b.life=0; } });
   ebullets=ebullets.filter(b=>b.life>0&&b.y<VH+20);
 
   // poison / hazard pools
@@ -682,10 +946,10 @@ function update(){
         e.x+=dir*e.spd; e.shootCD--;
         if(e.shootCD<=0){ e.shootCD=110+Math.random()*70;
           if(Math.abs(player.x-e.x)<70){ e.stomp=24; // close: stomp shockwave
-            for(let i=-2;i<=2;i++) ebullets.push({x:e.x+e.w/2,y:GROUND-4,vx:i*2.2,vy:-1.2,grav:0.07,dmg:18,life:130,c:'#c96'});
+            for(let i=-2;i<=2;i++) ebullets.push({x:e.x+e.w/2,y:GROUND-4,vx:i*2.2,vy:-1.2,grav:0.07,dmg:28,life:130,c:'#c96'});
             sfx('E2','8n');
           } else { // far: lob 2 heavy globs
-            for(let i=0;i<2;i++) ebullets.push({x:e.x+e.w/2,y:e.y+10,vx:dir*(1.6+i*0.6),vy:-2.4,grav:0.08,dmg:20,life:200,c:'#fb6'});
+            for(let i=0;i<2;i++) ebullets.push({x:e.x+e.w/2,y:e.y+10,vx:dir*(1.6+i*0.6),vy:-2.4,grav:0.08,dmg:30,life:200,c:'#fb6'});
             sfx('D3','8n'); } }
       } else if(e.type==='flyer'){
         // winged bug: advances toward player while bobbing up/down; occasional swoop dive
@@ -702,12 +966,25 @@ function update(){
         if(e.type==='crawler')e.y=GROUND-e.h-Math.abs(Math.sin(e.t*3))*3; }
     } });
   enemies.forEach(e=>{ if(!e.dead&&e.touch&&aabb(player,e))hurtPlayer(e.dmg*0.5); });
+  // 衝刺傷害（任意方向，每個敵人只被打一次）
+  if(player.dashTimer>0 && player.dashHits){
+    enemies.forEach(e=>{ if(!e.dead&&!player.dashHits.has(e)&&aabb(player,e)){
+      const dd=Math.round(120*player.dashDmgMult);
+      player.dashHits.add(e); damageEnemy(e,dd);
+      for(let k=0;k<8;k++) particles.push({x:e.x+e.w/2,y:e.y+e.h/2,vx:(Math.random()-.5)*6,vy:-2-Math.random()*3,life:16,c:player.dashVy<0?'#ffd24a':'#5ad6ff'});
+    }});
+    if(boss&&!bossIntro&&!player.dashHits.has(boss)&&aabb(player,boss)){ player.dashHits.add(boss); damageBoss(Math.round(120*player.dashDmgMult)); }
+  }
+  // 血天使天罰俯衝：飛行殘影
+  if(player.diving&&!player.onGround)
+    for(let i=0;i<3;i++) particles.push({x:player.x+Math.random()*26,y:player.y+Math.random()*44,vx:(Math.random()-.5)*2,vy:-Math.random()*2,life:10,c:i%2?'#e23a3a':'#ff8040'});
   enemies=enemies.filter(e=>!e.dead);
+  if(isSpecialLevel&&ally) updateAlly();
 
   if(boss){ if(bossIntro>0)bossIntro--; else{
       boss.t+=0.04; if(boss.hitFlash>0)boss.hitFlash--; if(boss.tele>0)boss.tele--; if(boss.charge>0)boss.charge--;
       const hpr=boss.hp/boss.maxhp; const enraged=hpr<0.4;
-      boss.shootCD--;
+      if(boss.ultWind<=0) boss.shootCD--;
       const px0=player.x, py0=player.y;
       const dx=px0-boss.x, dy=py0-boss.y;
 
@@ -718,7 +995,7 @@ function update(){
         if(boss.shootCD<=0){ boss.shootCD=enraged?70:100;
           // spawn 1-2 crawlers from the maw
           const n=enraged?2:1;
-          for(let i=0;i<n;i++){ if(enemies.length<40){ const e={x:boss.x+20,y:boss.y+boss.h-10,vx:0,vy:0,type:'crawler',hitFlash:0,t:0,dead:false,w:30,h:18,hp:18,dmg:10,spd:0.9,touch:true}; enemies.push(e);
+          for(let i=0;i<n;i++){ if(enemies.length<40){ const e={x:boss.x+20,y:boss.y+boss.h-10,vx:0,vy:0,type:'crawler',hitFlash:0,t:0,dead:false,w:30,h:18,hp:21,dmg:12,spd:0.9,touch:true}; enemies.push(e);
             for(let k=0;k<6;k++)particles.push({x:e.x+15,y:e.y+9,vx:(Math.random()-.5)*4,vy:-Math.random()*3,life:14,c:'#b14d8e'}); } }
           sfx('A3','8n');
           // spit 3 lobbed eggs
@@ -753,6 +1030,40 @@ function update(){
             sfx('B4','16n');
             if(Math.random()<(enraged?0.6:0.35)) boss.tele=22; // blink away
           } }
+      } else if(boss.level===5){
+        // 焦血毀滅者: 地面衝擊波 + 酸液迫擊炮 + 狂暴連射
+        const tier=hpr>0.66?0:hpr>0.33?1:2;
+        if(boss.charge>0){ boss.x+=boss.dashV;
+          if(boss.x<camX+30){boss.x=camX+30;boss.dashV*=-1;}
+          if(boss.x>camX+VW-boss.w-20){boss.x=camX+VW-boss.w-20;boss.dashV*=-1;}
+        } else {
+          const tx2=Math.max(camX+VW-110,px0+90); boss.x+=Math.sign(tx2-boss.x)*(enraged?1.2:0.8);
+        }
+        boss.y=boss.baseY+Math.sin(boss.t*1.8)*(tier===2?5:12);
+        if(boss.shootCD<=0){
+          if(tier===0){ boss.shootCD=enraged?70:90;
+            // 地面衝擊波：3條橫向彈
+            for(let i=-1;i<=1;i++) ebullets.push({x:boss.x+boss.w/2,y:GROUND-4,vx:i*(enraged?4:3.2),vy:-0.6,grav:0.03,dmg:22,life:160,c:'#c84010'});
+            pools.push({x:boss.x+boss.w/2,y:GROUND-4,r:26,life:180,dmg:0.55,c:'#c84010'});
+            sfx('E2','8n');
+          } else if(tier===1){ boss.shootCD=enraged?80:105;
+            // 酸液迫擊炮：4顆拋物線
+            for(let i=0;i<4;i++){
+              const tx3=px0+(Math.random()-.5)*110;
+              ebullets.push({x:boss.x+boss.w/2,y:boss.y+10,vx:(tx3-boss.x)/38,vy:-5.5-Math.random()*1.5,grav:0.13,dmg:20,life:130,c:'#7da010',acidBomb:true});
+            }
+            if(Math.random()<(enraged?0.55:0.3)){ boss.charge=52; boss.dashV=Math.sign(px0-boss.x)*5.5||-5.5; }
+            sfx('G3','8n');
+          } else { boss.shootCD=enraged?22:38;
+            const d=Math.hypot(dx,dy)||1, a=Math.atan2(dy,dx);
+            for(let i=-1;i<=1;i++) ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a+i*0.28)*4.8,vy:Math.sin(a+i*0.28)*4.8,dmg:19,life:130,c:'#f83010'});
+            if(Math.random()<0.12&&enemies.length<40){
+              const ef={x:boss.x+20,y:boss.y,vx:0,vy:0,type:'flyer',hitFlash:0,t:0,dead:false,w:30,h:22,hp:44,dmg:16,spd:1.1,touch:true,flyBase:boss.y+20,bobAmp:16,bobSp:0.06,shootCD:90,swoop:0,wing:Math.random()*6.28};
+              const m2=ENEMY_HP_MULT[5]; ef.hp=Math.round(ef.hp*m2); ef.maxhp=ef.hp; enemies.push(ef);
+            }
+            sfx('E3','32n');
+          }
+        }
       } else {
         // 吞星巢皇: MULTI-PHASE — spiral barrage + spawns + sweeping beam by hp tier
         const tx=Math.max(camX+VW-110,px0+100); boss.x+=Math.sign(tx-boss.x)*0.5;
@@ -762,9 +1073,61 @@ function update(){
           if(tier===0){ boss.shootCD=70; const n=8; const off=boss.t*2; for(let i=0;i<n;i++){ const a=(i/n)*6.28+off; ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*2.4,vy:Math.sin(a)*2.4,dmg:18,life:200,c:'#f66'}); } sfx('C3','8n'); }
           else if(tier===1){ boss.shootCD=80; // spiral + spawn
             const n=10; const off=boss.t*3; for(let i=0;i<n;i++){ const a=(i/n)*6.28+off; ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*2.6,vy:Math.sin(a)*2.6,dmg:18,life:200,c:'#f66'}); }
-            if(enemies.length<40){ const e={x:boss.x+20,y:GROUND-36,vx:0,vy:0,type:'upright',hitFlash:0,t:0,dead:false,w:24,h:36,hp:34,dmg:14,spd:1.1,touch:true}; enemies.push(e); } sfx('D3','8n'); }
+            if(enemies.length<40){ const e={x:boss.x+20,y:GROUND-36,vx:0,vy:0,type:'upright',hitFlash:0,t:0,dead:false,w:24,h:36,hp:43,dmg:19,spd:1.1,touch:true}; enemies.push(e); } sfx('D3','8n'); }
           else { boss.shootCD=14; // enraged: rapid aimed + sweeping
             const d=Math.hypot(dx,dy)||1; const a=Math.atan2(dy,dx)+Math.sin(boss.t*6)*0.5; ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*4,vy:Math.sin(a)*4,dmg:20,life:160,c:'#fb4'}); sfx('E3','32n'); }
+        }
+      }
+      // ===== 大絕招系統 =====
+      if(boss.ultWind<=0) boss.ultCD--;
+      if(boss.ultCD<=0 && boss.ultWind===0){
+        boss.ultWind=180; boss.shootCD=220; // 蓄力 3 秒，期間暫停普通攻擊
+        sfx('A1','4n');
+      }
+      if(boss.ultWind>0){
+        boss.ultWind--;
+        if(boss.ultWind===0){
+          boss.ultCD=900+Math.floor(Math.random()*300); // 下次大絕 15~20 秒後
+          const bx2=boss.x+boss.w/2, by2=boss.y+boss.h/2;
+          sfx('B1','4n');
+          if(boss.level===0){
+            // 噬肉巢母·巢母咆哮：20彈全向兩環 + 生成5只爬行者
+            for(let i=0;i<20;i++){const a=(i/20)*6.28;const spd=i%2?3.5:2.0;ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,dmg:22,life:240,grav:0.05,c:'#d97'});}
+            for(let i=0;i<5;i++){if(enemies.length<40){const e={x:bx2,y:boss.y+boss.h,vx:0,vy:0,type:'crawler',hitFlash:0,t:0,dead:false,w:30,h:18,hp:28,dmg:11,spd:1.2,touch:true};enemies.push(e);}}
+            for(let k=0;k<32;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*10,life:32,c:'#b14d8e'});
+          } else if(boss.level===1){
+            // 裂顎屠夫·狂暴三連斬：7向衝擊波 + 極速長衝刺反彈
+            for(let i=-3;i<=3;i++)ebullets.push({x:bx2,y:boss.y+boss.h-4,vx:i*3.0,vy:-1.8,grav:0.06,dmg:24,life:160,c:'#c43d2e'});
+            boss.charge=160; boss.dashV=(Math.sign(px0-boss.x)||1)*10;
+            for(let k=0;k<28;k++)particles.push({x:bx2,y:boss.y+boss.h,vx:(Math.random()-.5)*11,vy:-Math.random()*7,life:32,c:'#f44'});
+          } else if(boss.level===2){
+            // 瘟疫宿主·全域污染：24彈兩環 + 7個毒池鋪滿地面
+            for(let i=0;i<24;i++){const a=(i/24)*6.28;const spd=i%2?3.2:1.8;ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,dmg:17,life:220,c:'#7d4'});}
+            for(let i=0;i<7;i++)pools.push({x:camX+18+i*68,y:GROUND-6,r:34,life:480,dmg:0.65,c:'#7d4'});
+            for(let k=0;k<28;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*9,vy:(Math.random()-.5)*9,life:30,c:'#9f4'});
+          } else if(boss.level===3){
+            // 影刃潛獵者·幻影刃暴雨：三環共36彈 + 瞬移至玩家旁
+            for(let r=0;r<3;r++){for(let i=0;i<12;i++){const a=(i/12)*6.28+(r*0.52);ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*4.5,vy:Math.sin(a)*4.5,dmg:18,life:140,c:'#9af'});}}
+            boss.x=Math.max(camX+20,Math.min(camX+VW-boss.w-20,px0+(Math.random()<0.5?-130:130)));
+            boss.baseY=GROUND-100-Math.random()*30; boss.tele=1;
+            for(let k=0;k<22;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8,life:24,c:'#c8a'});
+          } else if(boss.level===5){
+            // 焦血毀滅者·絕命踩踏：3排地面衝擊波 + 5池 + 狂衝
+            const bx2=boss.x+boss.w/2;
+            sfx('E1','2n');
+            for(let r=0;r<3;r++) for(let i=-2;i<=2;i++) ebullets.push({x:bx2,y:GROUND-3-r*7,vx:i*3.4,vy:0,grav:0,dmg:25,life:140,c:'#c84010'});
+            for(let i=0;i<5;i++) pools.push({x:camX+44+i*82,y:GROUND-4,r:32,life:440,dmg:0.7,c:'#c84010'});
+            for(let k=0;k<44;k++) particles.push({x:bx2,y:boss.y+boss.h,vx:(Math.random()-.5)*14,vy:-Math.random()*8,life:46,c:k%2?'#f64':'#fb4'});
+            boss.charge=130; boss.dashV=Math.sign(px0-boss.x)*8||-8;
+            sfx('C1','2n');
+          } else {
+            // 吞星巢皇·末日星爆：三環彈幕(12+14+16) + 召喚重甲獸+2直立者
+            for(let ring=0;ring<3;ring++){const n=[12,14,16][ring],spd=2.4+ring*0.9;for(let i=0;i<n;i++){const a=(i/n)*6.28+(ring*0.42);ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,dmg:22,life:230,c:ring===2?'#fb4':'#f66'});}}
+            if(enemies.length<38){const eb={x:bx2,y:GROUND-54,vx:0,vy:0,type:'brute',hitFlash:0,t:0,dead:false,w:48,h:54,hp:160,dmg:23,spd:0.42,touch:true,shootCD:80,stomp:0};enemies.push(eb);}
+            for(let i=0;i<2;i++){if(enemies.length<40){const eu={x:boss.x+20+i*28,y:GROUND-36,vx:0,vy:0,type:'upright',hitFlash:0,t:0,dead:false,w:24,h:36,hp:68,dmg:15,spd:0.95,touch:true};enemies.push(eu);}}
+            for(let k=0;k<42;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*13,vy:(Math.random()-.5)*13,life:42,c:k%3?'#f66':'#fb4'});
+            sfx('C1','2n');
+          }
         }
       }
       // gravity for lobbed bullets handled in ebullet update
@@ -776,7 +1139,80 @@ function update(){
   drops=drops.filter(d=>!d.got&&d.t<700);
 
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.life--;}); particles=particles.filter(p=>p.life>0);
+  shockwaves.forEach(s=>{s.r+=s.spd;s.a-=0.055;}); shockwaves=shockwaves.filter(s=>s.a>0&&s.r<s.maxR);
   bgFarFight.forEach(f=>{ f.t+=0.05; f.x-=f.sp*0.2; if(f.x<-10)f.x=VW+10; });
+}
+
+function updateCamp(){
+  campT++; if(campMsgTime>0)campMsgTime--;
+  if(player.fireCD>0)player.fireCD--; if(player.meleeCD>0)player.meleeCD--;
+  if(player.meleeAnim>0)player.meleeAnim--; if(player.inv>0)player.inv--;
+  if(player.dashCD>0)player.dashCD--;
+  if(keys.dash && player.dashCD<=0){
+    const isUp=keys.jump;
+    const hdir=keys.left?-1:keys.right?1:0;
+    const effectiveH=hdir!==0?hdir:(isUp?0:player.face);
+    if(!isUp||hdir!==0) player.face=effectiveH||player.face;
+    player.dashCD=player.dashCDMax; player.dashTimer=isUp?10:12;
+    player.dashVx=effectiveH*(isUp?7:12); player.dashVy=isUp?-11:0;
+    player.vx=player.dashVx; player.vy=player.dashVy;
+    if(isUp) player.onGround=false;
+    player.inv=Math.max(player.inv,20); player.dashHits=new Set();
+    sfx('G5','32n');
+    for(let i=0;i<10;i++) particles.push({x:player.x+player.w/2+(Math.random()-.5)*8,y:player.y+(isUp?player.h:22)+Math.random()*12,
+      vx:-effectiveH*4+(Math.random()-.5)*2,vy:isUp?2+Math.random()*2:(Math.random()-.5)*2.5,life:13,c:isUp?'#ffd24a':i%2?'#5ad6ff':'#fff'});
+  }
+  if(player.dashTimer>0){
+    player.dashTimer--;
+    player.vx=player.dashVx;
+    if(player.dashVy<0) player.vy=player.dashVy;
+    if(player.dashTimer%2===0) for(let i=0;i<2;i++) particles.push({
+      x:player.dashVy<0?player.x+player.w/2+(Math.random()-.5)*6:player.face>0?player.x:player.x+player.w,
+      y:player.dashVy<0?player.y+player.h+Math.random()*4:player.y+14+Math.random()*20,
+      vx:-player.dashVx*0.15,vy:player.dashVy<0?2:-0.5,life:8,c:player.dashVy<0?'#ffd24a':'#5ad6ff'});
+  }
+  const accel=0.62,maxv=2.7;
+  if(player.dashTimer<=0){
+    if(keys.left){player.vx-=accel;player.face=-1;}
+    if(keys.right){player.vx+=accel;player.face=1;}
+    if(!keys.left&&!keys.right)player.vx*=0.7;
+    player.vx=Math.max(-maxv,Math.min(maxv,player.vx));
+  }
+  if(Math.abs(player.vx)>0.3&&player.onGround)player.walk+=0.3; else player.walk*=0.6;
+  if(keys.jump&&player.onGround&&player.dashTimer<=0){player.vy=-7.4;player.onGround=false;sfx('C5','32n');}
+  player.vy+=0.42; if(player.vy>9)player.vy=9;
+  player.x+=player.vx; player.y+=player.vy;
+  player.x=Math.max(4,player.x);
+  player.onGround=false;
+  if(player.y+player.h>=GROUND){player.y=GROUND-player.h;player.vy=0;player.onGround=true;}
+  // 購買
+  if(keys.fire&&player.fireCD<=0){
+    player.fireCD=22;
+    for(const s of CAMP_SHOPS){
+      if(Math.abs(player.x+player.w/2-s.x)<48){
+        if(score>=s.cost){score-=s.cost;s.apply(player);campShopMsg=s.name+'！  -'+s.cost+'分';campMsgTime=110;}
+        else{campShopMsg='分數不足！需要 '+s.cost+'分';campMsgTime=75;sfx('A2','16n');}
+        return;
+      }
+    }
+  }
+  // 出口：走進大門即前往下一關
+  if(player.x+player.w>=CAMP_EXIT_X+4){
+    sfx('C5','8n');
+    level++;
+    if(level>=5){recordScore(true);titleT=0;victoryParts=[];state='VICTORY';stopMusic();return;}
+    state='PLAY';musicMode='none';buildLevel();
+    return;
+  }
+  // 空戰更新
+  campAirFight.forEach(f=>{
+    f.x+=f.vx;f.t+=0.05;
+    if(f.x<-50)f.x=VW+15; if(f.x>VW+50)f.x=-15;
+    if(f.explode>0){f.explode--;if(f.explode===0){for(let k=0;k<10;k++)particles.push({x:f.x,y:f.y,vx:(Math.random()-.5)*5,vy:(Math.random()-.5)*5,life:22,c:f.human?'#ffd24a':'#9f4'});}}
+    if(Math.random()<0.003)f.explode=10;
+  });
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.06;p.life--;});
+  particles=particles.filter(p=>p.life>0);
 }
 
 //------------------------ DRAW ------------------------------
@@ -792,6 +1228,7 @@ function drawBackground(){
   g.addColorStop(0,T.sky[0]); g.addColorStop(0.55,T.sky[1]); g.addColorStop(1,T.sky[2]);
   X.fillStyle=g; X.fillRect(0,0,VW,GROUND);
 
+  if(isSpecialLevel) drawSpecialSwarm();
   // stars (dim/hidden in foggy levels)
   if(T.atm!=='spore'){ X.fillStyle='#fff';
     bgStars.forEach(s=>{ const sx=((s.x-camX*0.15)%(VW*1.5)+VW*1.5)%(VW*1.5); X.globalAlpha=(T.atm==='rain'?0.15:0.3)+s.b*0.5; X.fillRect(sx,s.y,1,1); }); X.globalAlpha=1; }
@@ -897,7 +1334,9 @@ function drawGun(cx,gy,f,rw){ X.save(); X.translate(cx,gy); if(f<0)X.scale(-1,1)
 
 function drawMarine(){
   const p=player; if(p.inv>0&&p.blessing<=0&&Math.floor(p.inv/4)%2===0)return;
-  const sx=p.x-camX, sy=p.y, f=p.face;
+  const _exOY=state==='EXTRACT'&&extractPhase>=2?extractPlayerOY:0;
+  if(state==='EXTRACT'&&extractPhase>=2) X.globalAlpha=Math.max(0,extractPhase===2?1-extractTimer/90:0);
+  const sx=p.x-camX, sy=p.y+_exOY, f=p.face;
   const LG=LEGIONS[selLegion];
   const blue=LG.color, blueL=shade(LG.color,1.45), blueXL=shade(LG.color,1.85), blueD=shade(LG.color,0.62), blueDD=shade(LG.color,0.4), trim=LG.trim, trimD=shade(LG.trim,0.65), steel='#8d929c', steelD='#4a4e57', steelL='#c4c9d2', dark='#0c0d14', leather='#5a3f24';
   const cx=sx+p.w/2; // body centre
@@ -1006,6 +1445,32 @@ function drawMarine(){
   }
   if(p.shield>0){ X.strokeStyle='rgba(120,200,255,'+(0.3+0.3*Math.sin(Date.now()/100))+')'; X.lineWidth=2; X.beginPath(); X.arc(cx,sy+22,25,0,6.28); X.stroke(); }
   if(p.blessing>0){ X.strokeStyle='rgba(255,215,80,'+(0.4+0.4*Math.sin(Date.now()/60))+')'; X.lineWidth=2; X.beginPath(); X.arc(cx,sy+22,29,0,6.28); X.stroke(); }
+  if(p.dashTimer>0){
+    const da=p.dashTimer/12, isUp=p.dashVy<0;
+    X.strokeStyle=isUp?'rgba(255,215,80,'+da+')':'rgba(90,214,255,'+da+')';
+    X.lineWidth=3; X.beginPath(); X.arc(cx,sy+22,26,0,6.28); X.stroke();
+    X.strokeStyle=isUp?'rgba(255,255,150,'+(da*0.5)+')':'rgba(180,240,255,'+(da*0.5)+')';
+    X.lineWidth=6; X.beginPath(); X.arc(cx,sy+22,26,0,6.28); X.stroke();
+  }
+  // 血天使：天罰俯衝就緒 — 紅橙光環
+  if(p.diveReady && selLegion===1){
+    const anim=0.4+0.35*Math.abs(Math.sin(Date.now()/110));
+    X.strokeStyle='rgba(230,58,58,'+anim+')'; X.lineWidth=2;
+    X.beginPath(); X.arc(cx,sy+22,26,0,6.28); X.stroke();
+    X.strokeStyle='rgba(255,120,40,'+(anim*0.35)+')'; X.lineWidth=7;
+    X.beginPath(); X.arc(cx,sy+22,33,0,6.28); X.stroke();
+    X.globalAlpha=1;
+  }
+  // 血天使：俯衝中 — 動力劍朝下
+  if(p.diving){
+    X.save(); X.translate(cx,sy+17); if(f<0)X.scale(-1,1); X.rotate(Math.PI*0.48);
+    X.fillStyle='#9fe8ff'; X.fillRect(-3,-3,6,46); X.fillStyle='#fff'; X.fillRect(-2,-3,4,22);
+    const gl=0.55+0.35*Math.abs(Math.sin(Date.now()/45));
+    X.globalAlpha=gl; X.strokeStyle='#e23a3a'; X.lineWidth=10;
+    X.beginPath(); X.moveTo(0,-3); X.lineTo(0,46); X.stroke();
+    X.globalAlpha=1; X.restore();
+  }
+  if(state==='EXTRACT'&&extractPhase>=2) X.globalAlpha=1;
 }
 
 function drawEnemy(e){
@@ -1104,13 +1569,46 @@ function drawBoss(){
   else if(b.level===1){ X.fillRect(bx-10,by+22,15,10); X.fillRect(bx+b.w-5,by+22,15,10); X.fillStyle='#ddd'; X.fillRect(bx-13,by+20,5,5); X.fillRect(bx+b.w+8,by+20,5,5); }
   else if(b.level===2){ X.fillStyle='#7d4'; for(let i=0;i<6;i++)X.fillRect(bx+10+i*11,by+b.h-4,5,7); }
   else if(b.level===3){ X.fillRect(bx-12,by+12,18,5); X.fillRect(bx+b.w-6,by+12,18,5); }
-  else { X.fillStyle='#fdd'; for(let i=0;i<8;i++)X.fillRect(bx+12+i*7,by-9,3,11); X.fillStyle=shade(b.col,0.7); X.fillRect(bx-12,by+24,18,8); X.fillRect(bx+b.w-6,by+24,18,8); }
+  else if(b.level===4){ X.fillStyle='#fdd'; for(let i=0;i<8;i++)X.fillRect(bx+12+i*7,by-9,3,11); X.fillStyle=shade(b.col,0.7); X.fillRect(bx-12,by+24,18,8); X.fillRect(bx+b.w-6,by+24,18,8); }
+  else { // level 5 焦血毀滅者：巨爪+焦碳甲殼+背脊
+    X.fillStyle=shade(b.col,0.7);
+    X.fillRect(bx-16,by+18,20,12); X.fillRect(bx+b.w-4,by+18,20,12); // 側爪
+    X.fillStyle='#ddd'; X.fillRect(bx-19,by+15,6,6); X.fillRect(bx+b.w+13,by+15,6,6); // 爪尖
+    X.fillStyle='#c84010';
+    for(let i=0;i<6;i++) X.fillRect(bx+14+i*10,by-10,4,12); // 背脊
+    X.fillStyle='rgba(255,100,20,0.4)'; X.beginPath(); X.arc(bx+b.w/2,by+b.h/2,b.w*0.7,0,6.28); X.fill(); // 火焰暈圈
+  }
   X.globalAlpha=1;
   const bw=VW-80; pxs(40,14,bw,8,'#300'); pxs(40,14,bw*(b.hp/b.maxhp),8,b.col); pxs(40,14,bw,1,'#fff'); pxs(40,22,bw,1,'#000');
   X.fillStyle='#fff'; X.font='8px "Courier New"'; X.textAlign='center'; X.fillText('▼ '+b.name+' ▼',VW/2,11); X.textAlign='left';
   if(bossIntro>0){ X.fillStyle='rgba(0,0,0,0.5)'; X.fillRect(0,VH/2-26,VW,40);
     X.fillStyle=b.col; X.font='bold 16px "Courier New"'; X.textAlign='center'; X.fillText('WARNING',VW/2,VH/2-8);
     X.fillStyle='#fff'; X.font='10px "Courier New"'; X.fillText(b.name,VW/2,VH/2+8); X.textAlign='left'; }
+  // 大絕招蓄力 UI
+  if(b.ultWind>0){
+    const prog=(180-b.ultWind)/180;
+    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏'];
+    // 底部蓄力紅條
+    pxs(0,VH-10,VW,10,'rgba(80,0,0,0.7)');
+    pxs(0,VH-10,VW*prog,10,'rgba(255,50,30,0.92)');
+    pxs(0,VH-10,VW*prog,3,'rgba(255,180,140,0.7)');
+    // 警告面板（閃爍）
+    const fl=Math.floor(b.ultWind/6)%2===0;
+    X.fillStyle='rgba(0,0,0,0.58)'; X.fillRect(0,VH/2-22,VW,38);
+    X.textAlign='center';
+    X.fillStyle=fl?'#ff4444':'#ff9090'; X.font='bold 12px "Courier New"';
+    X.fillText('⚠ 大絕招蓄力中 — '+ultNames[b.level]+' ⚠',VW/2,VH/2+2);
+    X.fillStyle='rgba(255,220,80,0.9)'; X.font='8px "Courier New"';
+    X.fillText(Math.ceil(b.ultWind/60)+'秒後釋放',VW/2,VH/2+15);
+    X.textAlign='left';
+    // Boss 周圍脈動光圈
+    const pulse=0.3+0.5*prog+0.2*Math.sin(b.t*12);
+    X.strokeStyle='rgba(255,60,30,'+pulse+')'; X.lineWidth=4+prog*5;
+    X.beginPath(); X.arc(bx+b.w/2,by+b.h/2,b.w*0.75+prog*12,0,6.28); X.stroke();
+    X.strokeStyle='rgba(255,200,100,'+(pulse*0.5)+')'; X.lineWidth=2;
+    X.beginPath(); X.arc(bx+b.w/2,by+b.h/2,b.w*0.75+prog*20,0,6.28); X.stroke();
+    X.globalAlpha=1;
+  }
 }
 
 function drawBullets(){
@@ -1133,26 +1631,62 @@ function drawDrops(){
     X.fillStyle=cols[d.type]; X.font='9px "Courier New"'; X.textAlign='center'; X.textBaseline='middle'; X.fillText(icons[d.type],sx,sy+1); X.textBaseline='alphabetic'; X.textAlign='left'; });
 }
 function drawParticles(){ particles.forEach(p=>{ X.globalAlpha=Math.min(1,p.life/12); px(p.x-1,p.y-1,2,2,p.c); }); X.globalAlpha=1; }
+function drawShockwaves(){
+  shockwaves.forEach(s=>{
+    X.globalAlpha=Math.max(0,s.a);
+    X.strokeStyle=s.c; X.lineWidth=s.w;
+    X.beginPath(); X.ellipse(Math.floor(s.x-camX),Math.floor(s.y),s.r,s.r*0.22,0,0,6.28); X.stroke();
+  });
+  X.globalAlpha=1; X.lineWidth=1;
+}
 
 function drawHUD(){
   pxs(8,8,100,8,'#400'); pxs(8,8,100*(player.hp/player.maxhp),8,'#e23a3a'); pxs(8,8,100,1,'#f88');
   X.fillStyle='#fff'; X.font='7px "Courier New"'; X.fillText('血 HP',8,24);
-  if(player.shield>0){ pxs(8,28,60,5,'#024'); pxs(8,28,60*(player.shield/60),5,'#5ad6ff'); X.fillStyle='#fff'; X.fillText('盾',70,33); }
-  pxs(8,38,60,4,'#330'); pxs(8,38,60*(player.energy/100),4,'#ffd24a'); X.fillStyle='#fff'; X.fillText('能量',70,42);
+  if(player.shield>0){ pxs(8,28,60,5,'#024'); pxs(8,28,60*(player.shield/player.maxShield),5,'#5ad6ff'); X.fillStyle='#fff'; X.fillText('盾',70,33); }
+  pxs(8,38,60,4,'#330'); pxs(8,38,60*(player.energy/player.maxEnergy),4,'#ffd24a'); X.fillStyle='#fff'; X.fillText('能量',70,42);
+  // 衝刺冷卻條
+  const dashReady=player.dashCD<=0;
+  pxs(8,44,60,3,'#024');
+  pxs(8,44,60*(1-player.dashCD/player.dashCDMax),3,dashReady?'#5ad6ff':'#1a6090');
+  X.fillStyle=dashReady?'#5ad6ff':'#446'; X.fillText(dashReady?'衝刺 READY':'衝刺 CD',70,48);
   X.textAlign='right'; X.font='8px "Courier New"';
   X.fillStyle=RANGED[player.rw].color; X.fillText('遠 '+RANGED[player.rw].name+' Lv'+player.rlvl[player.rw],VW-8,12);
   X.fillStyle=MELEE[player.mw].color; X.fillText('近 '+MELEE[player.mw].name+' Lv'+player.mlvl[player.mw],VW-8,24);
   X.fillStyle='#fff'; X.fillText('SCORE '+String(score).padStart(7,'0'),VW-8,36); X.textAlign='left';
-  X.fillStyle='#fff'; X.font='8px "Courier New"'; X.textAlign='center'; X.fillText('STAGE '+(level+1)+' / 5  '+THEMES[level].name,VW/2,VH-6);
+  X.fillStyle='#fff'; X.font='8px "Courier New"'; X.textAlign='center';
+  X.fillText(isSpecialLevel?'特殊任務 '+THEMES[5].name:'STAGE '+(level+1)+' / 5  '+THEMES[level].name,VW/2,VH-6);
+  if(isSpecialLevel&&relayTower&&relayTower.active&&!relayTower.done){
+    const tw=130, tx=VW/2-tw/2;
+    // 電磁塔 HP
+    pxs(tx,8,tw,7,'#024'); pxs(tx,8,tw*(relayTower.hp/relayTower.maxhp),7,'#5ad6ff'); pxs(tx,8,tw,1,'#8ff');
+    X.fillStyle='#5ad6ff'; X.font='bold 8px "Courier New"'; X.textAlign='center'; X.fillText('電磁塔 HP',VW/2,7);
+    // 守護倒數條
+    const kw=140, kx=VW/2-kw/2;
+    pxs(kx,18,kw,5,'#420');
+    pxs(kx,18,kw*(relayTower.timer/SPECIAL_DEFENSE_DUR),5,relayTower.timer>360?'#ffd24a':'#f55');
+    pxs(kx,18,kw,1,'#a60');
+    // 倒數秒數 + 已生/擊殺資訊
+    const secs=Math.ceil(relayTower.timer/60);
+    X.fillStyle=secs<=10?'#f55':'#ffd24a'; X.font='bold 9px "Courier New"'; X.textAlign='center';
+    X.fillText('守護 '+secs+'秒  敵人 '+specialEnemiesKilled+'/'+specialWaveCount+' 已殲', VW/2, 30);
+  }
   if(!boss){ const prog=Math.min(1,player.x/(LV_LEN[level]-VW)); pxs(VW/2-50,VH-16,100,3,'#222'); pxs(VW/2-50,VH-16,100*prog,3,'#6af'); pxs(VW/2+50,VH-18,3,7,'#f55'); }
   X.textAlign='left';
   if(player.blessing>0){ X.fillStyle='#ffd24a'; X.font='bold 9px "Courier New"'; X.textAlign='center'; X.fillText('★ 帝皇恩賜 INVINCIBLE ★',VW/2,52); X.textAlign='left'; }
   if(msgTime>0){ X.fillStyle='rgba(255,255,255,'+Math.min(1,msgTime/30)+')'; X.font='bold 10px "Courier New"'; X.textAlign='center'; X.fillText(msgText,VW/2,66); X.textAlign='left'; }
-  if(stageBanner>0){ const a=Math.min(1,stageBanner/30)*Math.min(1,(120-stageBanner)/15);
+  if(stageBanner>0){ const a=Math.min(1,stageBanner/30)*Math.min(1,(160-stageBanner)/18);
     const T=THEMES[level]; X.textAlign='center';
-    X.fillStyle='rgba(0,0,0,'+(0.5*a)+')'; X.fillRect(0,VH/2-22,VW,44);
-    X.fillStyle='rgba(255,210,74,'+a+')'; X.font='bold 13px "Courier New"'; X.fillText('STAGE '+(level+1),VW/2,VH/2-2);
-    X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText(T.name,VW/2,VH/2+14); X.textAlign='left'; }
+    X.fillStyle='rgba(0,0,0,'+(0.55*a)+')'; X.fillRect(0,VH/2-32,VW,isSpecialLevel?58:44);
+    if(isSpecialLevel){
+      X.fillStyle='rgba(255,150,50,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText('⚠ 特殊任務 SPECIAL MISSION ⚠',VW/2,VH/2-14);
+      X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 11px "Courier New"'; X.fillText(T.name,VW/2,VH/2+2);
+      X.fillStyle='rgba(200,180,255,'+(a*0.9)+')'; X.font='8px "Courier New"'; X.fillText('長官命令：深入蟲族侵攻星球，建立電磁塔待援',VW/2,VH/2+16);
+    } else {
+      X.fillStyle='rgba(255,210,74,'+a+')'; X.font='bold 13px "Courier New"'; X.fillText('STAGE '+(level+1),VW/2,VH/2-2);
+      X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText(T.name,VW/2,VH/2+14);
+    }
+    X.textAlign='left'; }
 }
 
 //------------------------ SCREENS ---------------------------
@@ -1169,9 +1703,56 @@ function drawTitle(){
   X.fillStyle='#ffd24a'; X.font='bold 40px "Courier New"'; X.fillText('40K',VW/2,130);
   X.fillStyle='#e23a3a'; X.font='bold 16px "Courier New"'; X.fillText('— 為 了 帝 皇 —',VW/2,156);
   X.strokeStyle='rgba(255,80,40,'+(0.5+0.4*Math.sin(titleT/10))+')'; X.lineWidth=2; X.beginPath(); X.ellipse(VW/2,110,150,46,0,0,6.28); X.stroke();
-  if(Math.floor(titleT/24)%2===0){ X.fillStyle='#fff'; X.font='12px "Courier New"'; X.fillText(isMobile?'▶ 點擊畫面開始 ◀':'▶ 按 ENTER 或點擊開始 ◀',VW/2,200); }
-  X.fillStyle='#88a'; X.font='8px "Courier New"'; X.fillText('1 PLAYER   —   原創像素致敬作品',VW/2,224);
-  X.fillStyle='#556'; X.font='7px "Courier New"'; X.fillText(isMobile?'方向鍵移動 / 跳 / 射擊 / 近戰 / 換武器':'←→移動  ↑跳  J射擊  K近戰  U/I換武器',VW/2,244);
+  if(Math.floor(titleT/24)%2===0){ X.fillStyle='#fff'; X.font='12px "Courier New"'; X.fillText(isMobile?'▶ 點擊畫面開始 ◀':'▶ 按 ENTER 或點擊開始 ◀',VW/2,198); }
+  // 排行榜按鈕
+  const lbHover=Math.floor(titleT/36)%2===0;
+  X.fillStyle='rgba(20,34,60,'+(lbHover?0.8:0.55)+')'; X.fillRect(VW/2-72,209,144,20);
+  X.strokeStyle=lbHover?'rgba(120,160,255,0.8)':'rgba(80,110,200,0.45)'; X.lineWidth=1;
+  X.strokeRect(VW/2-72,209,144,20);
+  X.fillStyle=lbHover?'#a8c4ff':'#7a9acc'; X.font='9px "Courier New"';
+  X.fillText(isMobile?'[ 排行榜 LEADERBOARD ]':'[ L ] 排行榜 LEADERBOARD',VW/2,222);
+  X.fillStyle='#445'; X.font='7px "Courier New"'; X.fillText('1 PLAYER  —  原創像素致敬作品',VW/2,234);
+  X.fillStyle='#334'; X.fillText(isMobile?'方向鍵移動 / 跳 / 射擊 / 近戰 / 換武器':'←→移動  ↑跳  J射擊  K近戰  Y衝刺  L排行榜',VW/2,246);
+  X.textAlign='left';
+}
+function drawLeaderboardScreen(){
+  titleT++;
+  // 背景
+  X.fillStyle='#05060a'; X.fillRect(0,0,VW,VH);
+  for(let i=0;i<55;i++){const sx=(i*71+titleT*0.3)%VW,sy=(i*43+7)%VH;X.globalAlpha=0.12+0.25*((i*9)%10)/10;X.fillStyle='#fff';X.fillRect(sx,sy,1,1);}
+  X.globalAlpha=1;
+  // 標題
+  X.textAlign='center';
+  X.fillStyle='#ffd24a'; X.font='bold 13px "Courier New"'; X.fillText('══ 排行榜  HALL OF FAME ══',VW/2,18);
+  X.fillStyle='#445'; X.font='8px "Courier New"'; X.fillText('★=勝利  †=戰死  分數越高越上',VW/2,30);
+  // 完整排行榜（立即全顯示）
+  const list=loadScores(); const show=Math.min(list.length,10);
+  if(!show){
+    X.fillStyle='#556'; X.font='10px "Courier New"'; X.fillText('尚無紀錄 — 開始你的第一場戰役！',VW/2,VH/2);
+  } else {
+    const rh=21;
+    for(let i=0;i<show;i++){
+      const e=list[i], y=44+i*rh, hot=(i===lastRank&&e.s===lastScore);
+      if(hot){ X.fillStyle='rgba(255,215,60,0.13)'; X.fillRect(18,y-14,VW-36,rh); }
+      else if(i<3){ X.fillStyle='rgba(255,255,255,0.04)'; X.fillRect(18,y-14,VW-36,rh); }
+      const medals=['[金]','[銀]','[銅]'];
+      X.textAlign='left'; X.font=hot?'bold 8px "Courier New"':'8px "Courier New"';
+      X.fillStyle=hot?'#ffd24a':i===0?'#ffd24a':i===1?'#b8c0cc':i===2?'#c87830':'#6a7888';
+      X.fillText((medals[i]||'   ')+(i+1)+'.',22,y);
+      X.fillStyle=e.w?'#ffd24a':'#e23a3a'; X.fillText(e.w?'★勝':'†敗',80,y);
+      X.fillStyle=hot?'#fff':i<3?'#ddd':'#99a'; X.fillText(e.lg,116,y);
+      X.textAlign='right'; X.fillStyle=hot?'#ffd24a':'#ccc';
+      X.font=hot?'bold 9px "Courier New"':'9px "Courier New"';
+      X.fillText(String(e.s).padStart(7,'0'),344,y);
+      X.fillStyle='#445'; X.font='7px "Courier New"'; X.textAlign='left';
+      X.fillText('S'+e.st,350,y); X.fillText(e.d,368,y);
+    }
+  }
+  // 返回提示（閃爍）
+  if(Math.floor(titleT/24)%2===0){
+    X.textAlign='center'; X.fillStyle='#778'; X.font='9px "Courier New"';
+    X.fillText(isMobile?'點擊任意處返回':'按任意鍵返回',VW/2,VH-8);
+  }
   X.textAlign='left';
 }
 function drawMiniMarine(cx,ty,col,trim){ const d=shade(col,0.6), l=shade(col,1.4);
@@ -1201,11 +1782,22 @@ function drawSelect(){
     X.fillStyle=L.trim;            X.font='8px "Courier New"';       X.fillText(L.hero, x+w/2, y+95);
     X.fillStyle=sel?'#cfe':'#8a9'; X.font='8px "Courier New"';       wrapCJK(L.perk, x+w/2, y+112, w-10, 11);
   }
-  const bw=180, bx=VW/2-bw/2, by=216, bh=30, glow=Math.floor(titleT/24)%2===0;
+  // 任務選擇列
+  const m0x=VW/2-112,m1x=VW/2+4,mby=203,mbw=108,mbh=14;
+  const ms0=selMission===0, ms1=selMission===1;
+  X.fillStyle=ms0?'rgba(30,60,140,.85)':'rgba(15,18,30,.6)'; X.fillRect(m0x,mby,mbw,mbh);
+  X.strokeStyle=ms0?'#5ad6ff':'#334'; X.lineWidth=ms0?1.5:1; X.strokeRect(m0x+.5,mby+.5,mbw-1,mbh-1);
+  X.fillStyle=ms0?'#cef':'#556'; X.font=(ms0?'bold ':'')+'7px "Courier New"'; X.textAlign='center';
+  X.fillText('⚔ 正常戰役  (5關連闖)',m0x+mbw/2,mby+10);
+  X.fillStyle=ms1?'rgba(140,30,10,.85)':'rgba(15,18,30,.6)'; X.fillRect(m1x,mby,mbw,mbh);
+  X.strokeStyle=ms1?'#ff7744':'#334'; X.lineWidth=ms1?1.5:1; X.strokeRect(m1x+.5,mby+.5,mbw-1,mbh-1);
+  X.fillStyle=ms1?'#fca':'#556'; X.font=(ms1?'bold ':'')+'7px "Courier New"';
+  X.fillText('☠ 特殊任務  (蟲族侵攻)',m1x+mbw/2,mby+10);
+  const bw=180, bx=VW/2-bw/2, by=222, bh=30, glow=Math.floor(titleT/24)%2===0;
   X.fillStyle='rgba(180,40,40,.55)'; X.fillRect(bx,by,bw,bh);
   X.strokeStyle=glow?'#ffbfae':'#ff9a8a'; X.lineWidth=1.5; X.strokeRect(bx+.5,by+.5,bw-1,bh-1);
   X.fillStyle='#ffe'; X.font='bold 13px "Courier New"'; X.fillText('⚔ 確認出戰 ⚔', VW/2, by+20);
-  X.fillStyle='#778'; X.font='8px "Courier New"'; X.fillText(isMobile?'點卡片選擇 · 再點卡片或下方按鈕出戰':'← → 選擇   ENTER 出戰', VW/2, 258);
+  X.fillStyle='#778'; X.font='7px "Courier New"'; X.fillText(isMobile?'點卡片選擇 · 上下切換任務 · 下方按鈕出戰':'← → 選軍團  ↑↓ 切換任務  ENTER 出戰', VW/2, 260);
   X.textAlign='left';
 }
 // ----- 本地排行榜（存於玩家手機 localStorage；版本更新只清快取，不會清除分數） -----
@@ -1216,71 +1808,755 @@ function todayStr(){ const d=new Date(); return (d.getMonth()+1)+'/'+d.getDate()
 function recordScore(won){
   try{
     const list=loadScores();
-    const entry={ s:score, st:won?5:(level+1), lg:LEGIONS[selLegion].name, w:won?1:0, d:todayStr() };
+    const stLabel=won?(isSpecialLevel?'特':5):(level+1);
+    const entry={ s:score, st:stLabel, lg:LEGIONS[selLegion].name, w:won?1:0, d:todayStr() };
     list.push(entry); list.sort((a,b)=>b.s-a.s);
     lastRank=list.indexOf(entry); lastScore=score;
     localStorage.setItem(SCORE_KEY, JSON.stringify(list.slice(0,20)));
   }catch(_){ lastRank=-1; }
 }
+// 共用排行榜（破關/死亡 螢幕用，最多7筆）
 function drawLeaderboard(topY){
-  const list=loadScores().slice(0,5);
-  X.textAlign='center'; X.fillStyle='#ffd24a'; X.font='bold 11px "Courier New"';
-  X.fillText('排行榜 BEST SCORES',VW/2,topY);
-  if(!list.length){ X.fillStyle='#667'; X.font='9px "Courier New"'; X.fillText('尚無紀錄 — 開始你的第一場戰役',VW/2,topY+16); X.textAlign='left'; return; }
-  for(let i=0;i<list.length;i++){ const e=list[i], y=topY+16+i*14, hot=(i===lastRank && e.s===lastScore);
-    X.font='10px "Courier New"'; X.fillStyle=hot?'#fff':(i===0?'#ffd24a':'#9ab');
-    X.textAlign='left';  X.fillText((i+1)+'.  '+e.lg, VW/2-92, y);
-    X.textAlign='right'; X.fillText((e.w?'★ ':'')+e.s, VW/2+58, y);
-    X.fillStyle=hot?'#cfe':'#667'; X.font='8px "Courier New"'; X.textAlign='left'; X.fillText('S'+e.st+'·'+e.d, VW/2+64, y);
+  const list=loadScores().slice(0,7);
+  X.textAlign='center'; X.fillStyle='#ffd24a'; X.font='bold 10px "Courier New"';
+  X.fillText('══ 排行榜 HALL OF FAME ══',VW/2,topY);
+  if(!list.length){ X.fillStyle='#556'; X.font='9px "Courier New"'; X.fillText('尚無紀錄',VW/2,topY+14); X.textAlign='left'; return; }
+  for(let i=0;i<list.length;i++){
+    const e=list[i], y=topY+14+i*13, hot=(i===lastRank&&e.s===lastScore);
+    if(i>=5) X.globalAlpha=0.5;
+    if(hot){ X.fillStyle='rgba(255,215,60,0.13)'; X.fillRect(VW/2-105,y-10,210,13); }
+    X.font=hot?'bold 8px "Courier New"':'8px "Courier New"';
+    X.textAlign='left';
+    X.fillStyle=hot?'#ffd24a':i===0?'#ffd24a':i<3?'#aac':'#6a7888';
+    X.fillText((i+1)+'.',VW/2-103,y);
+    X.fillStyle=e.w?'#ffd24a':'#e23a3a'; X.fillText(e.w?'★':'†',VW/2-91,y);
+    X.fillStyle=hot?'#fff':i<3?'#ddd':'#99a'; X.fillText(e.lg,VW/2-79,y);
+    X.textAlign='right'; X.fillStyle=hot?'#ffd24a':'#bbb'; X.font=hot?'bold 9px "Courier New"':'9px "Courier New"';
+    X.fillText(String(e.s).padStart(7,'0'),VW/2+52,y);
+    X.fillStyle='#445'; X.font='7px "Courier New"'; X.textAlign='left';
+    X.fillText('S'+e.st+' '+e.d,VW/2+56,y);
+    X.globalAlpha=1;
+  }
+  X.textAlign='left';
+}
+// 破關畫面大排行榜（逐筆動態出現，最多10筆）
+function drawBigLeaderboard(topY, revealT){
+  const list=loadScores(); const show=Math.min(list.length,10);
+  X.textAlign='center'; X.fillStyle='#ffd24a'; X.font='bold 10px "Courier New"';
+  X.fillText('══ 排行榜  HALL OF FAME ══',VW/2,topY);
+  if(!show){ X.fillStyle='#445'; X.font='9px "Courier New"'; X.fillText('尚無紀錄',VW/2,topY+15); X.textAlign='left'; return; }
+  const rh=19;
+  for(let i=0;i<show;i++){
+    if(revealT<i*14) break;
+    const e=list[i], y=topY+15+i*rh, hot=(i===lastRank&&e.s===lastScore);
+    X.globalAlpha=Math.min(1,(revealT-i*14)/14);
+    // 行背景
+    if(hot){ X.fillStyle='rgba(255,215,60,0.15)'; X.fillRect(20,y-13,VW-40,rh); }
+    else if(i<3){ X.fillStyle='rgba(255,255,255,0.04)'; X.fillRect(20,y-13,VW-40,rh); }
+    // 排名 + 獎牌
+    const medals=['[金]','[銀]','[銅]'];
+    X.textAlign='left'; X.font=hot?'bold 8px "Courier New"':'8px "Courier New"';
+    X.fillStyle=hot?'#ffd24a':i===0?'#ffd24a':i===1?'#b8c0cc':i===2?'#c87830':'#6a7888';
+    X.fillText((medals[i]||'   ')+(i+1)+'.',24,y);
+    // 勝/敗
+    X.fillStyle=e.w?'#ffd24a':'#e23a3a'; X.fillText(e.w?'★勝':'†敗',82,y);
+    // 軍團
+    X.fillStyle=hot?'#fff':i<3?'#ddd':'#99a'; X.fillText(e.lg,118,y);
+    // 分數
+    X.textAlign='right'; X.fillStyle=hot?'#ffd24a':'#ccc';
+    X.font=hot?'bold 10px "Courier New"':'10px "Courier New"';
+    X.fillText(String(e.s).padStart(7,'0'),346,y);
+    // 進度 + 日期
+    X.fillStyle='#445'; X.font='7px "Courier New"'; X.textAlign='left';
+    X.fillText('S'+e.st,352,y); X.fillText(e.d,370,y);
+    X.globalAlpha=1;
   }
   X.textAlign='left';
 }
 function drawGameOver(){
-  X.fillStyle='rgba(0,0,0,0.88)'; X.fillRect(0,0,VW,VH); X.textAlign='center';
-  X.fillStyle='#e23a3a'; X.font='bold 24px "Courier New"'; X.fillText('YOU DIED',VW/2,46);
-  X.fillStyle='#fff'; X.font='10px "Courier New"'; X.fillText('帝皇庇佑著你的英靈',VW/2,64);
-  X.fillStyle='#cfe'; X.font='12px "Courier New"'; X.fillText('STAGE '+(level+1)+'   SCORE '+score,VW/2,84);
-  if(lastRank===0){ X.fillStyle='#ffd24a'; X.font='bold 12px "Courier New"'; X.fillText('★ 最高分新紀錄！★',VW/2,103); }
-  else if(lastRank>=0 && lastRank<5){ X.fillStyle='#9ec'; X.font='10px "Courier New"'; X.fillText('新進榜 — 第 '+(lastRank+1)+' 名',VW/2,103); }
-  drawLeaderboard(126);
-  if(Math.floor(titleT++/24)%2===0){ X.fillStyle='#ffd24a'; X.font='11px "Courier New"'; X.fillText(isMobile?'點擊重新開始':'按 ENTER 重新開始',VW/2,240); }
+  X.fillStyle='rgba(0,0,0,0.9)'; X.fillRect(0,0,VW,VH); X.textAlign='center';
+  // 死亡標題（閃爍）
+  const fl=Math.floor(titleT/30)%2===0;
+  X.fillStyle=fl?'#e23a3a':'#ff6666'; X.font='bold 26px "Courier New"'; X.fillText('YOU DIED',VW/2,42);
+  X.fillStyle='#888'; X.font='9px "Courier New"'; X.fillText('帝皇庇佑著你的英靈',VW/2,58);
+  X.fillStyle='#cfe'; X.font='11px "Courier New"'; X.fillText('STAGE '+(level+1)+'  ·  SCORE '+score,VW/2,76);
+  // 軍團
+  X.fillStyle='#778'; X.font='8px "Courier New"'; X.fillText(LEGIONS[selLegion].name+' · '+LEGIONS[selLegion].hero,VW/2,90);
+  // 排名訊息
+  if(lastRank===0){ X.fillStyle='#ffd24a'; X.font='bold 11px "Courier New"'; X.fillText('★ 最高分新紀錄！★',VW/2,107); }
+  else if(lastRank>=0){ X.fillStyle='#9ec'; X.font='10px "Courier New"'; X.fillText('本次排名 — 第 '+(lastRank+1)+' 名',VW/2,107); }
+  drawLeaderboard(120);
+  if(Math.floor(titleT++/24)%2===0){ X.fillStyle='#ffd24a'; X.font='11px "Courier New"'; X.fillText(isMobile?'點擊重新開始':'按 ENTER 重新開始',VW/2,VH-8); }
   X.textAlign='left';
 }
 function drawVictory(){
-  X.fillStyle='#000'; X.fillRect(0,0,VW,VH); titleT++;
-  X.fillStyle='#fff'; for(let i=0;i<60;i++){ const sx=(i*61+titleT*0.5)%VW,sy=(i*41)%VH; X.fillRect(sx,sy,1,1);} X.textAlign='center';
-  X.fillStyle='#ffd24a'; X.font='bold 22px "Courier New"'; X.fillText('★ 勝 利 ★',VW/2,40);
-  X.fillStyle='#5ad6ff'; X.font='11px "Courier New"'; X.fillText('巢皇已殞落 — THE EMPEROR PROTECTS',VW/2,60);
-  X.fillStyle='#e23a3a'; X.font='bold 13px "Courier New"'; X.fillText('FINAL SCORE  '+score,VW/2,82);
-  if(lastRank===0){ X.fillStyle='#ffd24a'; X.font='bold 11px "Courier New"'; X.fillText('★ 最高分新紀錄！★',VW/2,100); }
-  drawLeaderboard(124);
-  if(Math.floor(titleT/24)%2===0){ X.fillStyle='#aaa'; X.font='10px "Courier New"'; X.fillText(isMobile?'點擊再玩一次':'按 ENTER 再玩一次',VW/2,240); }
-  X.textAlign='left';
+  if(!victoryWaitingNext) titleT++;
+  const t=titleT;
+  // 彩屑更新
+  victoryParts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.13;p.vx*=0.98;p.life--;});
+  victoryParts=victoryParts.filter(p=>p.life>0);
+  const confettiCols=['#ffd24a','#e23a3a','#5ad6ff','#9f4','#fff','#f9a','#b06aff'];
+
+  if(t<100){
+    // ── Phase 1：進場動畫 ──
+    if(t<75) for(let i=0;i<10;i++) victoryParts.push({
+      x:Math.random()*VW, y:-8+Math.random()*20,
+      vx:(Math.random()-.5)*6, vy:1.2+Math.random()*4,
+      life:90+Math.random()*70, c:confettiCols[Math.floor(Math.random()*confettiCols.length)], sz:2+Math.random()*3});
+    // 背景閃光 → 黑
+    const flashA=Math.max(0,0.8-t/80*0.8);
+    X.fillStyle='#000'; X.fillRect(0,0,VW,VH);
+    X.fillStyle='rgba(255,220,50,'+flashA+')'; X.fillRect(0,0,VW,VH);
+    // VICTORY 文字縮放跳入
+    const sc=t<60?0.15+0.9*(t/60):1+0.05*Math.sin((t-60)*0.6);
+    X.save(); X.translate(VW/2,VH/2-14); X.scale(sc,sc); X.textAlign='center';
+    X.shadowColor='#ffd24a'; X.shadowBlur=22;
+    X.fillStyle='#ffd24a'; X.font='bold 36px "Courier New"'; X.fillText('★ 勝 利 ★',0,0);
+    X.shadowBlur=0; X.restore();
+    if(t>45){ X.globalAlpha=Math.min(1,(t-45)/30); X.textAlign='center';
+      if(isSpecialLevel){
+        X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('任務成功 — 電磁塔上線，後援趕至！',VW/2,VH/2+16);
+        X.fillStyle='rgba(255,160,50,0.4)'; X.font='bold 18px "Courier New"'; X.fillText('MISSION COMPLETE',VW/2,VH/2+36);
+      } else {
+        X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('巢皇已殞落 — THE EMPEROR PROTECTS',VW/2,VH/2+16);
+        X.fillStyle='rgba(255,50,50,0.35)'; X.font='bold 18px "Courier New"'; X.fillText('VICTORY',VW/2,VH/2+36);
+      }
+      X.globalAlpha=1; }
+  } else if(t<(isSpecialLevel?600:240)){
+    // ── Phase 2：分數統計 ──
+    X.fillStyle='#05060a'; X.fillRect(0,0,VW,VH);
+    for(let i=0;i<50;i++){const sx=(i*61+t*0.4)%VW,sy=(i*41)%VH;X.globalAlpha=0.15+0.3*((i*9)%10)/10;X.fillStyle='#fff';X.fillRect(sx,sy,1,1);}
+    X.globalAlpha=1; X.textAlign='center';
+    // 標題
+    X.fillStyle='#ffd24a'; X.font='bold 22px "Courier New"'; X.fillText('★ 勝 利 ★',VW/2,32);
+    X.fillStyle='#5ad6ff'; X.font='9px "Courier New"'; X.fillText('THE EMPEROR PROTECTS',VW/2,48);
+    // 分數計數動畫（100~190幀完成）
+    const prog=Math.min(1,(t-100)/90);
+    const dispScore=Math.floor(score*prog);
+    X.fillStyle='#666'; X.font='9px "Courier New"'; X.fillText('FINAL SCORE',VW/2,70);
+    X.fillStyle=prog>=1?'#e23a3a':'#fff'; X.font='bold 28px "Courier New"'; X.fillText(String(dispScore).padStart(7,'0'),VW/2,100);
+    if(prog>=1){X.strokeStyle='rgba(255,50,50,0.5)';X.lineWidth=2;X.strokeRect(VW/2-92,82,184,26);}
+    // 軍團
+    if(t>155){X.globalAlpha=Math.min(1,(t-155)/28);
+      X.fillStyle='#cfe'; X.font='9px "Courier New"'; X.fillText(LEGIONS[selLegion].name+' · '+LEGIONS[selLegion].hero,VW/2,124);X.globalAlpha=1;}
+    // 排名 / 長官通訊
+    if(!isSpecialLevel){
+      if(t>185){X.globalAlpha=Math.min(1,(t-185)/28);
+        if(lastRank===0){X.fillStyle='#ffd24a';X.font='bold 13px "Courier New"';X.fillText('★ 最高分新紀錄！★',VW/2,148);}
+        else if(lastRank>=0){X.fillStyle='#9ec';X.font='11px "Courier New"';X.fillText('本次排名 — 第 '+(lastRank+1)+' 名',VW/2,148);}
+        X.globalAlpha=1;}
+    }
+    if(isSpecialLevel && t>150){
+      const ca=Math.min(1,(t-150)/22);
+      // 面板從下滑入
+      const panelY=Math.round(135+(1-ca)*90);
+      X.globalAlpha=ca;
+      // 面板主體
+      X.fillStyle='rgba(4,10,22,0.94)'; X.fillRect(14,panelY,VW-28,VH-panelY-14);
+      X.strokeStyle='rgba(80,200,255,0.6)'; X.lineWidth=1.5; X.strokeRect(14.5,panelY+0.5,VW-29,VH-panelY-15);
+      // 掃描線靜電感
+      X.fillStyle='rgba(0,8,24,0.28)'; for(let sl=panelY+2;sl<VH-16;sl+=4) X.fillRect(15,sl,VW-30,2);
+      // 標頭列
+      X.fillStyle='rgba(16,40,86,0.95)'; X.fillRect(14,panelY,VW-28,13);
+      X.fillStyle='#5ad6ff'; X.font='bold 7px "Courier New"'; X.textAlign='left';
+      X.fillText('[ IMPERIAL VOXNET  ▌  指揮頻道 COMMAND CHANNEL ]',22,panelY+10);
+      // 靜電噪點
+      if(Math.floor(t/4)%3===0){ X.globalAlpha=0.05;
+        for(let ni=0;ni<25;ni++) X.fillRect(16+Math.random()*(VW-32),panelY+Math.random()*(VH-panelY-16),Math.random()*4,1);
+        X.globalAlpha=ca; }
+      // 長官像素畫像
+      const py=panelY+16;
+      X.fillStyle='rgba(18,36,68,0.9)'; X.fillRect(18,py,30,54);
+      X.fillStyle='#2f5fb0'; X.fillRect(19,py+2,28,20);           // 頭盔主體
+      X.fillStyle='#4472c8'; X.fillRect(19,py+2,28,5);             // 頭盔上沿
+      X.fillStyle='#7fe0ff'; X.fillRect(28,py+7,8,3);              // 目鏡
+      X.fillStyle='#cdf6ff'; X.fillRect(33,py+7,2,2);              // 目鏡亮點
+      X.fillStyle='#e8c43a'; X.fillRect(19,py+2,28,1.5);           // 金邊頂
+      X.fillStyle='#e8c43a'; X.fillRect(19,py+20,28,1.5);          // 金邊底
+      X.fillStyle='#8d929c'; X.fillRect(22,py+10,12,5);            // 呼吸格柵
+      X.fillStyle='#6a6e77'; for(let g=0;g<3;g++) X.fillRect(22,py+10.5+g*1.6,12,0.8);
+      X.fillStyle='#2f5fb0'; X.fillRect(19,py+22,28,18);           // 軀幹
+      X.fillStyle='#4472c8'; X.fillRect(19,py+22,28,4);            // 胸甲上沿
+      X.fillStyle='#e8c43a'; X.fillRect(24,py+25,20,2);            // 鷹徽
+      X.fillStyle='#1a3a70'; X.fillRect(14,py+20,8,12);            // 左肩甲
+      X.fillStyle='#1a3a70'; X.fillRect(44,py+20,8,12);            // 右肩甲
+      X.fillStyle='#e8c43a'; X.fillRect(14,py+20,8,1.5); X.fillRect(44,py+20,8,1.5);
+      // 姓名 & 職銜
+      const nx=53;
+      X.fillStyle='#ffd24a'; X.font='bold 9px "Courier New"'; X.textAlign='left';
+      X.fillText('長 官',nx,py+10);
+      X.fillStyle='#668'; X.font='6px "Courier New"';
+      X.fillText('COMMANDER  //  帝皇之聲',nx,py+20);
+      X.strokeStyle='rgba(90,200,255,0.35)'; X.lineWidth=1;
+      X.beginPath(); X.moveTo(nx,py+23); X.lineTo(VW-20,py+23); X.stroke();
+      // 通訊文字（打字機效果）
+      const speech=[
+        '幹得好，戰士。電磁塔成功上線，',
+        '艦隊已確認信號，後援部隊正趕來。',
+        '你們為帝皇奪下了這片星球的橋頭堡。',
+        '帝皇庇佑你——任務圓滿完成！'
+      ];
+      const totalC=speech.reduce((s,l)=>s+l.length,0);
+      const shownC=Math.min(totalC,Math.floor((t-157)*0.38));
+      X.fillStyle='#c8ddf0'; X.font='8px "Courier New"'; X.textAlign='left';
+      let drawnC=0;
+      speech.forEach((ln,li)=>{
+        if(drawnC>=shownC) return;
+        const c=Math.min(ln.length,shownC-drawnC);
+        X.fillText(ln.slice(0,c),nx,py+26+li*13);
+        drawnC+=ln.length;
+      });
+      if(shownC<totalC){
+        // 打字游標閃爍
+        if(Math.floor(t/8)%2===0){
+          let cD=0,cL=0;
+          for(let li=0;li<speech.length;li++){if(cD+speech[li].length>shownC){cL=li;break;}cD+=speech[li].length;}
+          const curX=nx+X.measureText(speech[cL].slice(0,shownC-cD)).width;
+          X.fillStyle='#5ad6ff'; X.fillRect(curX,py+18+cL*13,3,9);
+        }
+      } else {
+        // 文字完成 → 暫停等玩家確認
+        victoryWaitingNext=true;
+        const nb=Math.floor(Date.now()/500)%2===0;
+        X.fillStyle=nb?'rgba(30,70,150,0.88)':'rgba(18,45,100,0.88)'; X.fillRect(VW/2-78,VH-40,156,24);
+        X.strokeStyle=nb?'#5ad6ff':'#2a5a8a'; X.lineWidth=1.5; X.strokeRect(VW/2-78,VH-40,156,24);
+        X.fillStyle=nb?'#e0f0ff':'#7aaccc'; X.font='bold 9px "Courier New"'; X.textAlign='center';
+        X.fillText(isMobile?'▶  點擊繼續  ▶':'▶  ENTER  繼續  ▶',VW/2,VH-23);
+      }
+      X.globalAlpha=1;
+    }
+    // 繼續提示（非特殊關卡）
+    if(!isSpecialLevel&&t>215&&Math.floor(t/20)%2===0){X.fillStyle='#444';X.font='9px "Courier New"';X.textAlign='center';X.fillText('. . .',VW/2,VH-10);}
+    // 繼續補充彩屑
+    if(t<200) for(let i=0;i<4;i++) victoryParts.push({
+      x:Math.random()*VW,y:-5,vx:(Math.random()-.5)*4,vy:1+Math.random()*3,
+      life:80+Math.random()*50,c:confettiCols[Math.floor(Math.random()*confettiCols.length)],sz:2+Math.random()*2});
+  } else {
+    // ── Phase 3：完整排行榜 ──
+    X.fillStyle='#05060a'; X.fillRect(0,0,VW,VH);
+    // 小標題列
+    X.fillStyle='rgba(20,24,36,0.8)'; X.fillRect(0,0,VW,24);
+    X.textAlign='center'; X.fillStyle='#ffd24a'; X.font='bold 10px "Courier New"';
+    X.fillText('★ 勝利  SCORE '+String(score).padStart(7,'0'),VW/2,15);
+    drawBigLeaderboard(28,t-240);
+    if(Math.floor(t/24)%2===0){X.fillStyle='#888';X.font='10px "Courier New"';X.textAlign='center';X.fillText(isMobile?'點擊再玩一次':'按 ENTER 再玩一次',VW/2,VH-6);}
+    X.textAlign='left';
+  }
+  // 繪製彩屑（所有 Phase 都顯示）
+  victoryParts.forEach(p=>{X.fillStyle=p.c;X.globalAlpha=Math.min(1,p.life/20);X.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(p.sz)||2,Math.ceil(p.sz)||2);});
+  X.globalAlpha=1; X.textAlign='left';
 }
 function handleStart(){ initAudio().then(()=>{ if(state==='TITLE'||state==='GAMEOVER'||state==='VICTORY')startGame(); }); }
 function startGame(){
-  level=0; score=0; player.hp=player.maxhp=100; player.shield=0; player.energy=0;
+  isSpecialLevel=(selMission===1);
+  level=isSpecialLevel?5:0;
+  victoryWaitingNext=false;
+  score=0; player.hp=player.maxhp=100; player.shield=0; player.energy=0;
   player.rw=0; player.mw=0; player.rlvl=[1,1,1,1]; player.mlvl=[1,1,1]; player.blessing=0; player.inv=0;
-  LEGIONS[selLegion].apply(player); // 套用所選軍團初期加成
-  musicMode='none'; state='PLAY'; buildLevel();
+  player.meleeDmgMult=1; player.dashDmgMult=1; player.dmgMult=1; player.maxShield=60; player.maxEnergy=100;
+  player.dashCDMax=52; player.diveReady=false; player.diving=false; player.diveHits=null;
+  LEGIONS[selLegion].apply(player);
+  musicMode='none'; state='PLAY';
+  if(isSpecialLevel) buildSpecialLevel(); else buildLevel();
+}
+
+//------------------------ EXTRACT SEQUENCE -------------------------
+function updateExtract(){
+  extractTimer++; if(msgTime>0)msgTime--;
+  if(player.inv>0)player.inv--;
+  if(ally&&ally.alive&&ally.inv>0)ally.inv--;
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.life--;}); particles=particles.filter(p=>p.life>0);
+
+  if(extractPhase===0){
+    // 玩家正常移動（簡化版）
+    if(player.fireCD>0)player.fireCD--; if(player.dashCD>0)player.dashCD--;
+    const accel=0.62,maxv=2.7;
+    if(keys.left){player.vx-=accel;player.face=-1;}
+    if(keys.right){player.vx+=accel;player.face=1;}
+    if(!keys.left&&!keys.right)player.vx*=0.7;
+    player.vx=Math.max(-maxv,Math.min(maxv,player.vx));
+    if(Math.abs(player.vx)>0.3&&player.onGround)player.walk+=0.3; else player.walk*=0.6;
+    if(keys.jump&&player.onGround){player.vy=-7.4;player.onGround=false;sfx('C5','32n');}
+    player.vy+=0.42; if(player.vy>9)player.vy=9;
+    player.x+=player.vx; player.y+=player.vy;
+    if(player.x<camX+2)player.x=camX+2;
+    player.onGround=false;
+    if(player.y+player.h>=GROUND){player.y=GROUND-player.h;player.vy=0;player.onGround=true;}
+    platforms.forEach(p=>{if(player.x+player.w>p.x+3&&player.x<p.x+p.w-3){const pb=player.y+player.h-player.vy;if(pb<=p.y+6&&player.y+player.h>=p.y&&player.y+player.h<=p.y+20){player.y=p.y-player.h;player.vy=0;player.onGround=true;}}});
+    const camMax=Math.max(LV_LEN[5]-VW, extractZoneX-200);
+    const desiredCam=Math.min(camMax, player.x-VW*0.35);
+    if(desiredCam>camX)camX+=(desiredCam-camX)*0.12;
+    // 盟友跟隨
+    if(ally&&ally.alive){
+      const adx=player.x-ally.x; ally.vx=Math.abs(adx)>40?Math.min(2.5,(ally.vx||0)+Math.sign(adx)*0.35):(ally.vx||0)*0.7;
+      ally.vy+=0.42;if(ally.vy>9)ally.vy=9; ally.y+=ally.vy; ally.x+=ally.vx||0;
+      ally.onGround=false; if(ally.y+44>=GROUND){ally.y=GROUND-44;ally.vy=0;ally.onGround=true;}
+      ally.face=Math.sign(adx)||1; if(Math.abs(ally.vx||0)>0.3)ally.walk=(ally.walk||0)+0.3; else ally.walk=(ally.walk||0)*0.6;
+    }
+    // 進入撤離區
+    if(player.x+player.w/2>extractZoneX-50&&player.onGround){
+      extractPhase=1; extractTimer=0;
+      shipSX=camX+VW+160; shipSY=-90; // 從右上角飛入
+      player.vx=0; player.face=1; if(ally&&ally.alive){ally.vx=0;ally.face=1;}
+      flashMsg('飛船到來！準備撤離！'); sfx('E5','4n');
+    }
+  } else if(extractPhase===1){
+    // 飛船降臨（120幀）
+    const prog=Math.min(1,extractTimer/120);
+    const ease=prog<0.5?2*prog*prog:1-Math.pow(-2*prog+2,2)/2;
+    const tgX=extractZoneX, tgY=GROUND-145;
+    shipSX=camX+VW+160+(tgX-(camX+VW+160))*ease;
+    shipSY=-90+(tgY+90)*ease;
+    if(extractTimer===80){sfx('G4','4n');}
+    if(extractTimer>=120){extractPhase=2;extractTimer=0;sfx('C5','4n');}
+  } else if(extractPhase===2){
+    // 吊升玩家與盟友（90幀）
+    const prog=Math.min(1,extractTimer/90);
+    extractPlayerOY=-prog*110;
+    if(ally&&ally.alive)extractAllyOY=-prog*110;
+    if(extractTimer>=90){extractPhase=3;extractTimer=0;sfx('G5','4n');}
+  } else if(extractPhase===3){
+    // 飛船飛離（90幀）
+    const prog=Math.min(1,extractTimer/90);
+    const ease=prog*prog;
+    const baseX=extractZoneX, baseY=GROUND-145;
+    shipSX=baseX+ease*(VW+200); shipSY=baseY-ease*220;
+    extractPlayerOY=-110-ease*110; if(ally&&ally.alive)extractAllyOY=-110-ease*110;
+    if(extractTimer>=90){
+      recordScore(true); titleT=0; victoryWaitingNext=false; victoryParts=[];
+      state='VICTORY'; stopMusic();
+    }
+  }
+}
+
+function drawExtractionZone(){
+  const sx=extractZoneX-camX;
+  if(sx<-80||sx>VW+80)return;
+  const pulse=0.35+0.38*Math.abs(Math.sin(extractTimer*0.07));
+  // 地面黃色標記
+  X.fillStyle='rgba(255,210,40,'+(pulse*0.28)+')'; X.fillRect(sx-52,GROUND-48,104,48);
+  X.strokeStyle='rgba(255,210,40,'+pulse+')'; X.lineWidth=2;
+  X.strokeRect(sx-52,GROUND-48,104,48);
+  // 閃爍上升箭頭
+  const aph=0.5+0.5*Math.abs(Math.sin(extractTimer*0.12));
+  X.fillStyle='rgba(255,220,60,'+aph+')'; X.font='bold 11px "Courier New"'; X.textAlign='center';
+  X.fillText('▲  ▲  ▲',sx,GROUND-18);
+  X.fillStyle='rgba(255,220,60,'+pulse+')'; X.font='bold 7px "Courier New"';
+  X.fillText('撤離點  EXTRACTION',sx,GROUND-52);
+  // 玩家未到時顯示方向指引
+  if(extractPhase===0&&player.x+player.w/2<extractZoneX-60){
+    const a2=0.45+0.45*Math.abs(Math.sin(extractTimer*0.1));
+    X.fillStyle='rgba(255,220,60,'+a2+')'; X.font='bold 10px "Courier New"';
+    X.fillText('▶',player.x-camX+player.w+16,player.y-6);
+  }
+  X.textAlign='left';
+}
+
+function drawShip(){
+  if(extractPhase===0)return;
+  const sx=shipSX-camX, sy=shipSY;
+  // phase 3：飛離時漸出
+  const alpha=extractPhase===3?Math.max(0,1-(extractTimer-50)/40):1;
+  X.globalAlpha=alpha; X.save(); X.translate(Math.floor(sx),Math.floor(sy));
+  // 主艦體
+  X.fillStyle='#1e3a70'; X.fillRect(-42,-14,84,24);
+  X.fillStyle='#2e54a4'; X.fillRect(-42,-14,84,6);  // 艦頂光澤
+  X.fillStyle='#c8a030'; X.fillRect(-42,-16,84,3);  // 帝國金邊頂
+  X.fillStyle='#c8a030'; X.fillRect(-42,8,84,2);    // 帝國金邊底
+  // 上艙
+  X.fillStyle='#162a54'; X.fillRect(-24,-26,48,14);
+  X.fillStyle='#203a78'; X.fillRect(-24,-26,48,6);
+  X.fillStyle='#c8a030'; X.fillRect(-24,-28,48,3);
+  // 機翼
+  X.fillStyle='#162a54'; X.fillRect(-86,-7,46,10); X.fillRect(40,-7,46,10);
+  X.fillStyle='#1e3a70'; X.fillRect(-86,-4,46,5);  X.fillRect(40,-4,46,5);
+  X.fillStyle='#c8a030'; X.fillRect(-86,-8,46,2);  X.fillRect(40,-8,46,2);
+  // 機翼翼尖
+  X.fillStyle='#0e1e3e'; X.fillRect(-92,-6,8,8);   X.fillRect(84,-6,8,8);
+  // 引擎輝光（兩側各2）
+  X.fillStyle='rgba(60,160,255,0.95)'; X.fillRect(74,-5,10,9);  X.fillRect(84,-3,16,5);
+  X.fillStyle='rgba(60,160,255,0.95)'; X.fillRect(-84,-5,10,9); X.fillRect(-100,-3,16,5);
+  // 引擎下方推進光
+  const eng=0.5+0.4*Math.abs(Math.sin(extractTimer*0.18));
+  X.fillStyle='rgba(80,180,255,'+eng+')'; X.beginPath(); X.ellipse(-82,10,7,3,0,0,6.28); X.fill();
+  X.fillStyle='rgba(80,180,255,'+eng+')'; X.beginPath(); X.ellipse(82,10,7,3,0,0,6.28); X.fill();
+  // 機腹砲管
+  X.fillStyle='#2a3e5c'; X.fillRect(-14,10,28,9); X.fillStyle='#3a4e6c'; X.fillRect(-10,17,20,4);
+  // 鷹徽
+  X.fillStyle='#c8a030'; X.fillRect(-8,-7,16,9); X.fillStyle='#0e1e3e'; X.fillRect(-6,-5,12,7);
+  X.fillStyle='#c8a030'; X.fillRect(-3,-4,6,5);
+  // 懸停光暈（phase1/2）
+  if(extractPhase===1||extractPhase===2){
+    const hover=Math.sin(extractTimer*0.12)*3;
+    X.globalAlpha=alpha*(0.18+0.14*Math.abs(Math.sin(extractTimer*0.15)));
+    X.fillStyle='rgba(80,200,255,1)'; X.beginPath(); X.ellipse(0,22+hover,38,9,0,0,6.28); X.fill();
+    X.globalAlpha=alpha;
+  }
+  X.restore();
+  // 牽引光束（phase 2）
+  if(extractPhase===2){
+    const prog=Math.min(1,extractTimer/90);
+    const playerSx=player.x-camX+player.w/2;
+    const playerSy=player.y+extractPlayerOY+player.h/2;
+    X.globalAlpha=alpha*(0.12+0.16*Math.abs(Math.sin(extractTimer*0.14)));
+    X.fillStyle='rgba(100,210,255,0.7)';
+    X.beginPath();
+    X.moveTo(sx-28,sy+20); X.lineTo(sx+28,sy+20);
+    X.lineTo(playerSx+28+prog*18,playerSy); X.lineTo(playerSx-28-prog*18,playerSy);
+    X.closePath(); X.fill();
+    if(ally&&ally.alive){
+      const allySx=ally.x-camX+13, allySy=ally.y+extractAllyOY+22;
+      X.beginPath();
+      X.moveTo(sx-18,sy+20); X.lineTo(sx+18,sy+20);
+      X.lineTo(allySx+18,allySy); X.lineTo(allySx-18,allySy);
+      X.closePath(); X.fill();
+    }
+  }
+  X.globalAlpha=1;
+}
+
+function drawExtractHUD(){
+  const msgs=['前往撤離點 — 往右走','飛船降臨中…','正在撤離…','撤離成功！'];
+  const cols=['#ffd24a','#5ad6ff','#5ad6ff','#ffd24a'];
+  const a=0.5+0.4*Math.abs(Math.sin(extractTimer*0.07));
+  X.fillStyle='rgba(0,0,0,0.6)'; X.fillRect(0,0,VW,20);
+  X.fillStyle=cols[extractPhase]; X.font='bold 9px "Courier New"'; X.textAlign='center';
+  X.fillStyle=cols[extractPhase].replace(')',','+a+')').replace('rgb','rgba');
+  // fallback: just use the color directly
+  X.fillStyle=cols[extractPhase]; X.globalAlpha=a;
+  X.fillText(msgs[extractPhase],VW/2,14);
+  X.globalAlpha=1;
+  X.fillStyle='#fff'; X.font='8px "Courier New"'; X.textAlign='right';
+  X.fillText('SCORE '+String(score).padStart(7,'0'),VW-8,14);
+  X.textAlign='left';
+}
+//------------------------ SPECIAL LEVEL -------------------------
+function respawnAlly(){
+  ally.hp=ally.maxhp; ally.alive=true; ally.respawnTimer=0;
+  ally.x=Math.max(camX+20,player.x-50); ally.y=GROUND-44;
+  ally.vx=0; ally.vy=0; ally.inv=90;
+  flashMsg('盟友復活！'); sfx('C5','8n');
+  for(let k=0;k<14;k++) particles.push({x:ally.x+13,y:ally.y+22,vx:(Math.random()-.5)*5,vy:-Math.random()*4,life:22,c:'#5ad6ff'});
+}
+function updateAlly(){
+  if(!ally) return;
+  // 死亡/復活計時
+  if(!ally.alive){
+    if(ally.respawnTimer>0){ ally.respawnTimer--; if(ally.respawnTimer<=0) respawnAlly(); }
+    return;
+  }
+  if(ally.hp<=0){ ally.alive=false; ally.respawnTimer=600; flashMsg('盟友陣亡！10秒後復活'); sfx('A2','8n'); return; }
+  ally.t+=0.06; if(ally.inv>0)ally.inv--; if(ally.fireCD>0)ally.fireCD--;
+  if(ally.meleeCD>0)ally.meleeCD--; if(ally.meleeAnim>0)ally.meleeAnim--;
+  ally.vy+=0.42; if(ally.vy>9)ally.vy=9; ally.y+=ally.vy; ally.x+=ally.vx||0; ally.vx=(ally.vx||0)*0.72;
+  ally.onGround=false;
+  if(ally.y+44>=GROUND){ally.y=GROUND-44;ally.vy=0;ally.onGround=true;}
+  platforms.forEach(p=>{if(ally.x+26>p.x+3&&ally.x<p.x+p.w-3){const pb=ally.y+44-(ally.vy||0);if(pb<=p.y+6&&ally.y+44>=p.y&&ally.y+44<=p.y+20){ally.y=p.y-44;ally.vy=0;ally.onGround=true;}}});
+  // 找最近敵人
+  let nearest=null,nearDist=9999;
+  enemies.forEach(e=>{if(!e.dead){const d=Math.abs(e.x-ally.x);if(d<nearDist){nearDist=d;nearest=e;}}});
+  const targetX=boss&&!bossIntro?boss.x:nearest?nearest.x:player.x+80;
+  ally.face=Math.sign(targetX-ally.x)||1;
+  if(nearDist<48||(boss&&!bossIntro&&Math.abs(boss.x-ally.x)<64)){
+    // 近戰
+    if(ally.meleeCD<=0){ally.meleeCD=20;ally.meleeAnim=14;
+      const hx=ally.face>0?ally.x+26:ally.x-42, box={x:hx,y:ally.y+7,w:42,h:30};
+      if(nearest&&!nearest.dead&&aabb(box,nearest)) damageEnemy(nearest,36);
+      if(boss&&!bossIntro&&aabb(box,boss)) damageBoss(36);
+      sfx('E4','16n');}
+    ally.vx=(ally.vx||0)*0.5;
+  } else if(nearDist<190||(boss&&!bossIntro)){
+    if(ally.onGround) ally.vx=(ally.vx||0)+ally.face*0.28;
+    if(ally.fireCD<=0&&(nearDist<170||(boss&&!bossIntro))){ally.fireCD=20;
+      bullets.push({x:ally.x+(ally.face>0?26:-4),y:ally.y+17,vx:ally.face*6.5,vy:0,dmg:12,sz:5,color:'#5ad6ff',pierce:false,life:80,kind:0});
+      sfx('C5','32n');}
+  } else {
+    ally.vx=(ally.vx||0)+ally.face*0.45;
+  }
+  ally.vx=Math.max(-2.5,Math.min(2.5,ally.vx||0));
+  ally.x=Math.max(camX+2,ally.x);
+  if(Math.abs(ally.vx||0)>0.3&&ally.onGround) ally.walk=(ally.walk||0)+0.3; else ally.walk=(ally.walk||0)*0.6;
+  // 受傷
+  enemies.forEach(e=>{if(!e.dead&&e.touch&&aabb({x:ally.x,y:ally.y,w:26,h:44},e)){if(ally.inv<=0){ally.hp-=e.dmg*0.28;ally.inv=38;for(let k=0;k<4;k++)particles.push({x:ally.x+13,y:ally.y+22,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,life:12,c:'#4af'});}}});
+  if(boss&&!bossIntro&&aabb({x:ally.x,y:ally.y,w:26,h:44},boss)&&ally.inv<=0){ally.hp-=1.2;ally.inv=40;}
+  ebullets.forEach(b=>{if(aabb({x:b.x-3,y:b.y-3,w:6,h:6},{x:ally.x,y:ally.y,w:26,h:44})&&ally.inv<=0){ally.hp-=b.dmg*0.4;b.life=0;ally.inv=30;}});
+}
+
+function drawAlly(){
+  if(!ally)return;
+  if(!ally.alive){
+    if(ally.respawnTimer>0){
+      const sx=Math.max(20,player.x-camX-30);
+      X.fillStyle='rgba(90,214,255,0.75)'; X.font='bold 7px "Courier New"'; X.textAlign='center';
+      X.fillText('盟友 '+Math.ceil(ally.respawnTimer/60)+'秒後復活',sx,GROUND-4);
+      X.textAlign='left';
+    }
+    return;
+  }
+  if(ally.inv>0&&Math.floor(ally.inv/4)%2===0)return;
+  const _aOY=state==='EXTRACT'&&extractPhase>=2?extractAllyOY:0;
+  if(state==='EXTRACT'&&extractPhase>=2) X.globalAlpha=Math.max(0,extractPhase===2?1-extractTimer/90:0);
+  const sx=ally.x-camX,sy=ally.y+_aOY,f=ally.face;
+  const blue='#2f5fb0',blueL='#5080d0',blueD='#1a3a70',trim='#e8c43a',steel='#8d929c',dark='#0c0d14';
+  X.fillStyle=blueD; X.fillRect(sx+5,sy+30,8,14); X.fillRect(sx+14,sy+30,8,14);
+  X.fillStyle=blue; X.fillRect(sx+2,sy+12,22,18); X.fillStyle=blueL; X.fillRect(sx+2,sy+12,22,3);
+  X.fillStyle=blueD; X.fillRect(sx-2,sy+10,10,10); X.fillRect(sx+18,sy+10,10,10);
+  X.fillStyle=trim; X.fillRect(sx,sy+10,10,1.5); X.fillRect(sx+18,sy+10,10,1.5);
+  X.fillStyle=blue; X.fillRect(sx+6,sy,14,14); X.fillStyle=blueL; X.fillRect(sx+6,sy,14,3);
+  X.fillStyle='#5ad6ff'; X.fillRect(f>0?sx+14:sx+6,sy+5,5,3);
+  X.fillStyle=trim; X.fillRect(sx+9,sy-3,8,3);
+  if(ally.meleeAnim>0){
+    const prog=1-(ally.meleeAnim/14); X.save(); X.translate(sx+13,sy+17); if(f<0)X.scale(-1,1);
+    X.rotate(-1.2+prog*2.4); X.fillStyle='#9fe8ff'; X.fillRect(0,-3,42,6); X.globalAlpha=1; X.restore();
+  } else { drawGun(sx+13,sy+17,f,0); }
+  const bw=26; pxs(sx,sy-8,bw,3,'#400'); pxs(sx,sy-8,bw*(ally.hp/ally.maxhp),3,'#5ad6ff');
+  X.fillStyle='#5ad6ff'; X.font='6px "Courier New"'; X.textAlign='center'; X.fillText('盟友',sx+13,sy-10); X.textAlign='left';
+  if(ally.hp/ally.maxhp<0.5){X.strokeStyle='rgba(80,180,255,0.4)';X.lineWidth=2;X.beginPath();X.arc(sx+13,sy+22,20,0,6.28);X.stroke();}
+  if(state==='EXTRACT'&&extractPhase>=2) X.globalAlpha=1;
+}
+
+function drawTower(){
+  if(!relayTower||!relayTower.active)return;
+  const tx=relayTower.x-camX,ty=GROUND;
+  X.fillStyle='#2a3040'; X.fillRect(tx-8,ty-48,16,48);
+  X.fillStyle='#3a4a5c'; X.fillRect(tx-5,ty-88,10,42);
+  X.fillStyle='#5a6a80'; X.fillRect(tx-9,ty-94,18,8); X.fillStyle='#7090b0'; X.fillRect(tx-7,ty-94,14,4);
+  X.fillStyle='#b0d0f0'; X.fillRect(tx-1,ty-108,2,16);
+  // 橫臂
+  X.fillStyle='#4a5a6a'; X.fillRect(tx-14,ty-82,8,3); X.fillRect(tx+6,ty-82,8,3);
+  X.fillStyle='#7090b0'; X.fillRect(tx-12,ty-82,2,6); X.fillRect(tx+10,ty-82,2,6);
+  const pulse=0.3+0.55*Math.abs(Math.sin(levelTimer*0.07));
+  X.strokeStyle='rgba(90,214,255,'+pulse+')'; X.lineWidth=1.5;
+  X.beginPath(); X.arc(tx,ty-102,9+Math.sin(levelTimer*0.04)*3,0,6.28); X.stroke();
+  X.strokeStyle='rgba(90,214,255,'+(pulse*0.35)+')'; X.lineWidth=1;
+  X.beginPath(); X.arc(tx,ty-102,22+Math.sin(levelTimer*0.04)*3,0,6.28); X.stroke();
+  if(!relayTower.done){
+    const bw=44; pxs(tx-22,ty-118,bw,4,'#400'); pxs(tx-22,ty-118,bw*(relayTower.hp/relayTower.maxhp),4,'#5ad6ff');
+    X.fillStyle='#5ad6ff'; X.font='7px "Courier New"'; X.textAlign='center'; X.fillText('電磁塔',tx,ty-121); X.textAlign='left';
+  }
+}
+
+function drawSpecialSwarm(){
+  bgSpecialSwarm.forEach(f=>{
+    f.t+=0.04; f.x-=f.spd*0.28; if(f.x<-20)f.x=VW+22;
+    const wf=Math.sin(f.t*0.8)>0;
+    X.globalAlpha=0.18+f.sz*0.12; X.fillStyle='#7040a8';
+    X.fillRect(f.x,f.y,f.sz*4,f.sz*2);
+    if(wf){X.fillRect(f.x-f.sz*3,f.y-f.sz,f.sz*3,f.sz*2);X.fillRect(f.x+f.sz*4,f.y-f.sz,f.sz*3,f.sz*2);}
+    else {X.fillRect(f.x-f.sz*2,f.y-f.sz*2.5,f.sz*3,f.sz*3);X.fillRect(f.x+f.sz*4,f.y-f.sz*2.5,f.sz*3,f.sz*3);}
+    X.globalAlpha=1;
+  });
+}
+//------------------------ CAMP DRAW -------------------------
+function drawCampBackground(){
+  // 天空：夜間戰場
+  const g=X.createLinearGradient(0,0,0,GROUND);
+  g.addColorStop(0,'#060810'); g.addColorStop(0.45,'#0e1428'); g.addColorStop(1,'#1a1208');
+  X.fillStyle=g; X.fillRect(0,0,VW,GROUND);
+  // 星星
+  X.fillStyle='#fff';
+  for(let i=0;i<55;i++){const sx=(i*71+3)%VW,sy=(i*43+5)%(GROUND*0.65);X.globalAlpha=0.2+0.5*((i*9)%10)/10;X.fillRect(sx,sy,1,1);}
+  X.globalAlpha=1;
+  // 遠方爆炸閃光
+  for(let i=0;i<4;i++){
+    if(Math.sin(campT*0.22+i*1.7)>0.82){
+      X.fillStyle='rgba(255,190,70,0.28)';X.beginPath();X.arc((i*110+35)%VW,22+i*13,7+i*2,0,6.28);X.fill();
+    }
+  }
+  // 空戰：人類雷鷹對蟲族飛行生物
+  campAirFight.forEach(f=>{
+    X.save(); X.translate(f.x,f.y); if(f.vx<0)X.scale(-1,1);
+    if(f.human){
+      // 雷鷹砲艦剪影
+      X.fillStyle='#162448'; X.fillRect(-15,-5,30,10);   // 主艦體
+      X.fillStyle='#1e3060'; X.fillRect(-10,-9,20,6);    // 上艙
+      X.fillStyle='#b89020'; X.fillRect(-10,-10,20,2);   // 金邊
+      X.fillStyle='#162448'; X.fillRect(-24,-2,12,4);    // 左翼
+      X.fillStyle='#162448'; X.fillRect(12,-2,12,4);     // 右翼
+      X.fillStyle='rgba(80,160,255,0.9)'; X.fillRect(14,-2,6,4); // 引擎輝光
+      X.fillStyle='rgba(80,160,255,0.4)'; X.fillRect(20,-1,10,2);
+      if(Math.sin(campT*0.4+f.t)>0.68){
+        X.fillStyle='#ffd24a'; X.fillRect(-26,-1,14,2); // 武器射擊
+      }
+    } else {
+      // 蟲族飛行生物剪影
+      const wf=Math.sin(campT*0.38+f.t)>0;
+      X.fillStyle='#5a2068'; X.fillRect(-6,-4,12,9);    // 身體
+      X.fillStyle='#7a3088'; X.fillRect(-5,-5,10,5);    // 甲殼
+      if(wf){X.fillStyle='#6a2878';X.fillRect(-20,-3,15,5);X.fillRect(5,-3,15,5);}
+      else  {X.fillStyle='#6a2878';X.fillRect(-18,-10,14,13);X.fillRect(4,-10,14,13);}
+      X.fillStyle='#f6a'; X.fillRect(-3,-2,2,2); X.fillRect(1,-2,2,2); // 眼
+      if(Math.sin(campT*0.3+f.t*1.5)>0.78){X.fillStyle='#9f4';X.fillRect(-20,1,16,2);}
+    }
+    if(f.explode>0){X.fillStyle='rgba(255,160,50,0.65)';X.beginPath();X.arc(0,0,9,0,6.28);X.fill();}
+    X.restore();
+  });
+  // 地平線火焰輝光
+  const hg=X.createLinearGradient(0,GROUND-50,0,GROUND);
+  hg.addColorStop(0,'rgba(0,0,0,0)'); hg.addColorStop(1,'rgba(200,80,20,0.5)');
+  X.fillStyle=hg; X.fillRect(0,GROUND-50,VW,50);
+  // 後方帝國金屬壁壘
+  const wallY=GROUND-70;
+  X.fillStyle='#1a1e25'; X.fillRect(0,wallY,VW,70);
+  for(let wx=0;wx<VW;wx+=36){X.fillStyle=wx%72===0?'#20242c':'#1c2028';X.fillRect(wx,wallY,34,70);}
+  X.fillStyle='#0e1016'; for(let wx=0;wx<VW;wx+=36)X.fillRect(wx+34,wallY,2,70);
+  // 彈孔/損傷
+  X.fillStyle='#0c0f14';
+  for(let i=0;i<7;i++){const dx=i*65+18;X.beginPath();X.arc(dx,wallY+22,3+i%3,0,6.28);X.fill();}
+  // 牆面火把/照明燈
+  for(let i=1;i<5;i++){
+    const tx=i*(VW/5), fl=0.45+0.35*Math.sin(campT*0.19+i*1.2);
+    X.fillStyle='rgba(255,140,40,'+fl+')'; X.beginPath(); X.arc(tx,wallY+7,10,0,6.28); X.fill();
+    X.fillStyle='rgba(255,220,120,0.85)'; X.beginPath(); X.arc(tx,wallY+7,4,0,6.28); X.fill();
+    X.fillStyle='rgba(255,150,40,0.07)'; X.beginPath(); X.moveTo(tx,wallY+7); X.lineTo(tx-22,GROUND); X.lineTo(tx+22,GROUND); X.closePath(); X.fill();
+  }
+  // 帝皇鷹徽文字
+  X.textAlign='center';
+  X.fillStyle='rgba(190,150,38,0.55)'; X.font='bold 9px "Courier New"';
+  X.fillText('[ IMPERIAL SUPPLY DEPOT ]',VW/2,wallY+52);
+  X.textAlign='left';
+  // 地面：礫石軍營地面
+  X.fillStyle='#222018'; X.fillRect(0,GROUND,VW,VH-GROUND);
+  X.fillStyle='#2c2a24'; X.fillRect(0,GROUND,VW,5);
+  X.fillStyle='#181610';
+  for(let gx=0;gx<VW;gx+=9)for(let rw=0;rw<4;rw++) if((gx+rw*4)%7<3)X.fillRect(gx,GROUND+2+rw*4,4+((gx*rw)%3),2);
+}
+
+function drawCamp(){
+  drawCampBackground();
+  // 補給攤位
+  const stallTints=['rgba(255,80,80,0.07)','rgba(80,200,255,0.07)','rgba(255,220,60,0.07)','rgba(255,200,60,0.07)'];
+  CAMP_SHOPS.forEach((shop,i)=>{
+    const near=Math.abs(player.x+player.w/2-shop.x)<48;
+    const sx=shop.x-28, sy=GROUND-65, sw=56, sh=65;
+    // 攤位主體
+    X.fillStyle=near?'#30343c':'#24272e'; X.fillRect(sx,sy,sw,sh);
+    // 頂部橫板
+    X.fillStyle=near?'#464c58':'#343840'; X.fillRect(sx-2,sy,sw+4,8);
+    // 側柱
+    X.fillStyle='#1a1d22'; X.fillRect(sx-2,sy,4,sh); X.fillRect(sx+sw-2,sy,4,sh);
+    // 展示區
+    X.fillStyle='#181b22'; X.fillRect(sx+5,sy+10,sw-10,42);
+    if(near){X.fillStyle=stallTints[i];X.fillRect(sx+5,sy+10,sw-10,42);}
+    // 商品色塊
+    X.fillStyle=shop.col; X.fillRect(shop.x-10,sy+14,20,16);
+    X.fillStyle='#000'; X.font='bold 9px "Courier New"'; X.textAlign='center';
+    X.fillText(shop.icon,shop.x,sy+26);
+    // 名稱 + 英文
+    X.fillStyle=near?'#fff':'#99a'; X.font='bold 7px "Courier New"'; X.fillText(shop.name,shop.x,sy+39);
+    X.fillStyle='#555'; X.font='6px "Courier New"'; X.fillText(shop.en,shop.x,sy+47);
+    // 價格
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.fillText(shop.cost+'分',shop.x,sy+60);
+    // 靠近時發光邊框 + 操作提示
+    if(near){
+      const ga=0.5+0.28*Math.sin(campT*0.2);
+      X.strokeStyle='rgba(255,210,74,'+ga+')'; X.lineWidth=1.5; X.strokeRect(sx-1.5,sy-1.5,sw+3,sh+3);
+      X.fillStyle='rgba(255,210,74,0.08)'; X.fillRect(sx,sy,sw,sh);
+      X.fillStyle='rgba(255,255,255,0.9)'; X.font='7px "Courier New"'; X.fillText(shop.desc,shop.x,sy-10);
+      X.fillStyle='#ffd24a'; X.fillText(isMobile?'[射擊] 購買':'[J] 購買',shop.x,sy-20);
+    }
+    X.textAlign='left';
+  });
+  // 出口大門
+  {
+    const gx=CAMP_EXIT_X, ga=0.32+0.22*Math.sin(campT*0.17);
+    // 門框
+    X.fillStyle='#3a2010'; X.fillRect(gx-8,GROUND-88,50,88);
+    // 門扇光暈
+    X.fillStyle='rgba(255,170,50,'+ga*0.7+')'; X.fillRect(gx,GROUND-82,34,82);
+    X.fillStyle='#160e04'; X.fillRect(gx+2,GROUND-80,30,78);
+    X.fillStyle='rgba(255,180,60,'+ga+')'; X.fillRect(gx+2,GROUND-80,30,78);
+    // 門柵
+    X.fillStyle='rgba(40,24,8,0.85)';
+    for(let b=0;b<4;b++) X.fillRect(gx+3+b*8,GROUND-80,3,78);
+    // 金頂
+    X.fillStyle='#c8a030'; X.fillRect(gx-8,GROUND-88,50,5);
+    // 標示文字
+    X.textAlign='center';
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.fillText('下一關',gx+17,GROUND-93);
+    X.fillStyle='#aaa'; X.font='6px "Courier New"'; X.fillText('NEXT STAGE',gx+17,GROUND-103);
+    // 脈動箭頭
+    const arr=0.5+0.5*Math.sin(campT*0.22);
+    X.fillStyle='rgba(255,210,74,'+arr+')'; X.font='bold 13px "Courier New"'; X.fillText('▶',gx+17,GROUND-114);
+    X.textAlign='left';
+  }
+  // 玩家 + 粒子
+  drawMarine(); drawParticles();
+  // 頂部 HUD 條
+  X.fillStyle='rgba(0,0,0,0.62)'; X.fillRect(0,0,VW,22);
+  X.fillStyle='#5ad6ff'; X.font='bold 8px "Courier New"'; X.textAlign='left';
+  X.fillText('STAGE '+(level+1)+' CLEARED  ·  補給站',8,14);
+  X.fillStyle='#ffd24a'; X.textAlign='right';
+  X.fillText('SCORE '+String(score).padStart(7,'0'),VW-8,14);
+  X.textAlign='left';
+  // HP / 護盾 / 能量條
+  pxs(8,24,80,6,'#400'); pxs(8,24,80*(player.hp/player.maxhp),6,'#e23a3a'); pxs(8,24,80,1,'#f88');
+  X.fillStyle='#fff'; X.font='7px "Courier New"'; X.fillText('HP '+player.hp+'/'+player.maxhp,92,31);
+  if(player.shield>0){pxs(8,32,60,5,'#024');pxs(8,32,60*(player.shield/player.maxShield),5,'#5ad6ff');X.fillStyle='#fff';X.fillText('盾',72,38);}
+  pxs(8,39,60,4,'#330');pxs(8,39,60*(player.energy/player.maxEnergy),4,'#ffd24a');
+  // 過關橫幅（前 120 幀）
+  if(campT<130){
+    const a=Math.min(1,campT/20)*Math.min(1,(130-campT)/20);
+    X.fillStyle='rgba(0,0,0,'+(0.55*a)+')'; X.fillRect(0,VH/2-30,VW,52);
+    X.textAlign='center';
+    X.fillStyle='rgba(255,210,74,'+a+')'; X.font='bold 15px "Courier New"'; X.fillText('STAGE '+(level+1)+' CLEARED!',VW/2,-10+VH/2);
+    X.fillStyle='rgba(255,255,255,'+a+')'; X.font='9px "Courier New"'; X.fillText('前往補給站補充物資，走入大門進入下一關',VW/2,VH/2+12);
+    X.textAlign='left';
+  }
+  // 購買訊息
+  if(campMsgTime>0){
+    const a=Math.min(1,campMsgTime/28);
+    X.fillStyle='rgba(0,0,0,'+(0.55*a)+')'; X.fillRect(VW/2-100,VH/2+26,200,22);
+    X.fillStyle='rgba(255,255,200,'+a+')'; X.font='bold 9px "Courier New"'; X.textAlign='center';
+    X.fillText(campShopMsg,VW/2,VH/2+41); X.textAlign='left';
+  }
+  if(msgTime>0){ X.fillStyle='rgba(255,255,255,'+Math.min(1,msgTime/30)+')'; X.font='bold 10px "Courier New"'; X.textAlign='center'; X.fillText(msgText,VW/2,80); X.textAlign='left'; }
 }
 
 //------------------------ LOOP ------------------------------
 function drawPauseOverlay(){
-  X.fillStyle='rgba(0,0,0,0.7)'; X.fillRect(0,0,VW,VH); X.textAlign='center';
-  X.fillStyle='#ffd24a'; X.font='bold 24px "Courier New"'; X.fillText('暫 停',VW/2,VH/2-10);
-  X.fillStyle='#fff'; X.font='11px "Courier New"'; X.fillText('PAUSED',VW/2,VH/2+8);
-  X.fillStyle='#9ab'; X.font='9px "Courier New"'; X.fillText(isMobile?'點擊 ▶ 繼續':'按 P 或 ESC 繼續',VW/2,VH/2+26); X.textAlign='left';
+  X.fillStyle='rgba(0,0,0,0.72)'; X.fillRect(0,0,VW,VH); X.textAlign='center';
+  if(!quitConfirm){
+    // ── 一般暫停畫面 ──
+    X.fillStyle='#ffd24a'; X.font='bold 24px "Courier New"'; X.fillText('暫 停',VW/2,VH/2-16);
+    X.fillStyle='#fff'; X.font='11px "Courier New"'; X.fillText('PAUSED',VW/2,VH/2+2);
+    X.fillStyle='#9ab'; X.font='9px "Courier New"'; X.fillText(isMobile?'點擊 ▶ 繼續':'按 P 或 ESC 繼續',VW/2,VH/2+18);
+    // 離開按鈕
+    X.fillStyle='rgba(160,30,30,0.45)'; X.fillRect(VW/2-62,VH/2+30,124,22);
+    X.strokeStyle='rgba(220,70,70,0.65)'; X.lineWidth=1; X.strokeRect(VW/2-62,VH/2+30,124,22);
+    X.fillStyle='#f88'; X.font='9px "Courier New"';
+    X.fillText(isMobile?'[ 離開 — 不計入排行榜 ]':'[ Q ] 離開  — 不計入排行榜',VW/2,VH/2+45);
+  } else {
+    // ── 雙重確認對話框 ──
+    X.fillStyle='rgba(20,10,10,0.92)'; X.fillRect(VW/2-100,VH/2-46,200,100);
+    X.strokeStyle='rgba(220,70,70,0.8)'; X.lineWidth=1.5; X.strokeRect(VW/2-100,VH/2-46,200,100);
+    X.fillStyle='#ffa0a0'; X.font='bold 12px "Courier New"'; X.fillText('確定要離開？',VW/2,VH/2-24);
+    X.fillStyle='#888'; X.font='8px "Courier New"'; X.fillText('此局分數不計入排行榜',VW/2,VH/2-8);
+    // 確認按鈕（左）
+    X.fillStyle='rgba(180,30,30,0.6)'; X.fillRect(VW/2-96,VH/2+4,88,28);
+    X.strokeStyle='rgba(255,80,80,0.7)'; X.lineWidth=1; X.strokeRect(VW/2-96,VH/2+4,88,28);
+    X.fillStyle='#f88'; X.font='bold 9px "Courier New"'; X.fillText('確認離開',VW/2-52,VH/2+22);
+    // 取消按鈕（右）
+    X.fillStyle='rgba(30,80,30,0.6)'; X.fillRect(VW/2+8,VH/2+4,88,28);
+    X.strokeStyle='rgba(80,200,80,0.7)'; X.lineWidth=1; X.strokeRect(VW/2+8,VH/2+4,88,28);
+    X.fillStyle='#8f8'; X.font='bold 9px "Courier New"'; X.fillText('繼續遊戲',VW/2+52,VH/2+22);
+    // 鍵盤提示
+    X.fillStyle='#556'; X.font='7px "Courier New"'; X.fillText(isMobile?'點選按鈕確認':'Q=確認離開  P/ESC=取消',VW/2,VH/2+44);
+  }
+  X.textAlign='left';
 }
 function loop(){
   update(); X.setTransform(SCALE,0,0,SCALE,0,0); X.clearRect(0,0,VW,VH);
-  const playing=(state==='PLAY'||state==='TRANS');
+  const playing=(state==='PLAY'||state==='TRANS'||state==='CAMP'||state==='EXTRACT');
   pauseBtn.style.display=playing?'block':'none';
-  if(isMobile)document.getElementById('touch').style.display=playing?'block':'none'; // 非遊戲狀態收起觸控盤
-  if(audioReady && (state==='TITLE'||state==='SELECT') && musicMode!=='menu') setMusic('menu'); // 開場/選角共用選單音樂
+  if(isMobile)document.getElementById('touch').style.display=(state==='PLAY'||state==='TRANS'||state==='CAMP'||(state==='EXTRACT'&&extractPhase===0))?'block':'none';
+  if(audioReady && (state==='TITLE'||state==='SELECT'||state==='CAMP'||state==='LEADERBOARD') && musicMode!=='menu') setMusic('menu');
   if(state==='TITLE'){ drawTitle(); }
   else if(state==='SELECT'){ drawSelect(); }
-  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); drawMarine(); drawParticles(); drawHUD();
+  else if(state==='LEADERBOARD'){ drawLeaderboardScreen(); }
+  else if(state==='CAMP'){ drawCamp(); if(paused)drawPauseOverlay(); }
+  else if(state==='EXTRACT'){ drawBackground(); drawPlatforms(); drawParticles(); drawShockwaves(); drawExtractionZone(); drawShip(); drawAlly(); drawMarine(); drawExtractHUD(); if(paused)drawPauseOverlay(); }
+  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); if(isSpecialLevel)drawTower(); if(isSpecialLevel)drawAlly(); drawMarine(); drawParticles(); drawShockwaves(); drawHUD();
     if(paused&&playing)drawPauseOverlay();
     if(state==='GAMEOVER')drawGameOver(); if(state==='VICTORY')drawVictory(); }
   requestAnimationFrame(loop);
