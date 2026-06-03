@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="為了帝皇">
 <meta name="theme-color" content="#05060a">
-<meta name="build" content="2026.06.03.1">
+<meta name="build" content="2026.06.03.2">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
@@ -437,7 +437,8 @@ const RANGED=[
   {name:'爆彈槍 BOLTER', color:'#ffd24a',speed:6.5,dmg:14,rate:14,cnt:1,spread:0,pierce:false,sz:5,snd:'C5'},
   {name:'火焰槍 FLAMER', color:'#ff7a1a',speed:4.2,dmg:4, rate:5, cnt:1,spread:0.18,pierce:false,sz:7,life:26,snd:'E4'},
   {name:'電磁砲 RAILGUN',color:'#5ad6ff',speed:11, dmg:34,rate:34,cnt:1,spread:0,pierce:true,sz:6,snd:'A5'},
-  {name:'槍榴彈 GRENADE',color:'#a8e063',speed:4.4,dmg:40,rate:60,cnt:1,spread:0,pierce:false,sz:7,snd:'G3',lob:true,blast:46}
+  {name:'槍榴彈 GRENADE',color:'#a8e063',speed:4.4,dmg:40,rate:60,cnt:1,spread:0,pierce:false,sz:7,snd:'G3',lob:true,blast:46},
+  {name:'充能步槍 CHARGE RIFLE',color:'#a0e4ff',speed:4.8,dmg:12,rate:21,cnt:1,spread:0,pierce:false,sz:5,snd:'B4'}
 ];
 const GRENADE_RATE=[60,49,38,27,16]; // per-level fire interval (frames): ~1s -> ~0.27s
 const MELEE=[
@@ -489,10 +490,10 @@ const THEMES=[
 let atmParts=[];
 
 const player={x:60,y:GROUND-44,w:26,h:44,vx:0,vy:0,onGround:true,face:1,
-  hp:100,maxhp:100,shield:0,rw:0,mw:0,rlvl:[1,1,1,1],mlvl:[1,1,1],
+  hp:100,maxhp:100,shield:0,rw:0,mw:0,rlvl:[1,1,1,1,1],mlvl:[1,1,1],
   fireCD:0,meleeCD:0,meleeAnim:0,energy:0,inv:0,blessing:0,walk:0,dashCD:0,dashTimer:0,dashVx:0,dashVy:0,dashHits:null,
   meleeDmgMult:1,dashDmgMult:1,dmgMult:1,maxShield:60,maxEnergy:100,
-  dashCDMax:52,diveReady:false,diving:false,diveHits:null};
+  dashCDMax:52,diveReady:false,diving:false,diveHits:null,chargeTimer:0};
 let bullets=[],ebullets=[],enemies=[],drops=[],particles=[],platforms=[],pools=[],shockwaves=[];
 let boss=null,bossIntro=0,score=0;
 let bgStars=[],bgBuildings=[],bgFarFight=[],satellites=[],bgSpecialSwarm=[];
@@ -690,6 +691,16 @@ function grenadeExplode(b){
   if(boss&&!bossIntro){ const cx=boss.x+boss.w/2,cy=boss.y+boss.h/2; if(Math.hypot(cx-b.x,cy-b.y)<r+boss.w/2) damageBoss(b.dmg); }
   sfx('C2','8n');
 }
+function fireChargedShot(){
+  const lvl=player.rlvl[4]||1;
+  const dmg=300*(1+(lvl-1)*0.25)*(player.blessing>0?2:1)*player.dmgMult;
+  player.fireCD=24;
+  const ox=player.x+player.w/2+player.face*(player.w/2+2), oy=player.y;
+  bullets.push({x:ox,y:oy,vx:player.face*4.8,vy:0,dmg:dmg,sz:1,color:'#a0e4ff',pierce:true,life:110,kind:4,pw:player.w,ph:player.h,hits:new Set()});
+  sfx('A3','4n');
+  for(let i=0;i<24;i++) particles.push({x:ox,y:oy+player.h/2,vx:player.face*(2+Math.random()*4),vy:(Math.random()-.5)*5,life:20,c:i%2?'#a0e4ff':'#fff'});
+  shockwaves.push({x:ox,y:oy+player.h/2,r:4,spd:5,maxR:player.w*2,a:0.9,w:4,c:'#a0e4ff'});
+}
 function doMelee(){
   const w=MELEE[player.mw],lvl=player.mlvl[player.mw];
   if(player.meleeCD>0)return;
@@ -860,7 +871,15 @@ function update(){
   if(player.diving&&player.onGround){ player.diving=false; diveImpact(); }
   if(player.onGround) player.diveReady=false;
 
-  if(keys.fire && player.dashTimer<=0)fireRanged();
+  if(player.dashTimer<=0){
+    if(player.rw===4){
+      if(keys.fire){ if(player.chargeTimer<120)player.chargeTimer++; }
+      else if(player.chargeTimer>0){
+        if(player.chargeTimer>=120) fireChargedShot(); else fireRanged();
+        player.chargeTimer=0;
+      }
+    } else { player.chargeTimer=0; if(keys.fire)fireRanged(); }
+  }
   if(keys.melee){ if(selLegion===1&&player.diveReady&&!player.onGround&&!player.diving) startDive(); else doMelee(); }
 
   // side-scroller: camera only advances right, never scrolls back
@@ -917,6 +936,13 @@ function update(){
       if(boss&&!bossIntro&&aabb({x:b.x-b.sz/2,y:b.y-b.sz/2,w:b.sz,h:b.sz},boss)) hit=true;
       if(b.y+b.sz/2>=GROUND){ b.y=GROUND-b.sz/2; hit=true; }
       if(hit||b.life<=0){ grenadeExplode(b); b.life=0; }
+      return;
+    }
+    if(b.kind===4){
+      if(!b.hits)b.hits=new Set();
+      const bx4={x:b.x-b.pw/2,y:b.y,w:b.pw,h:b.ph};
+      enemies.forEach(e=>{if(!e.dead&&!b.hits.has(e)&&aabb(bx4,e)){b.hits.add(e);damageEnemy(e,b.dmg);for(let k=0;k<8;k++)particles.push({x:e.x+e.w/2,y:e.y+e.h/2,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6,life:18,c:'#a0e4ff'});}});
+      if(boss&&!bossIntro&&!b.hits.has(boss)&&aabb(bx4,boss)){b.hits.add(boss);damageBoss(b.dmg);}
       return;
     }
     enemies.forEach(e=>{ if(!e.dead&&aabb({x:b.x-b.sz/2,y:b.y-b.sz/2,w:b.sz,h:b.sz},e)){ damageEnemy(e,b.dmg); if(!b.pierce)b.life=0;
@@ -1327,9 +1353,15 @@ function drawGun(cx,gy,f,rw){ X.save(); X.translate(cx,gy); if(f<0)X.scale(-1,1)
   if(rw===0){ X.fillStyle='#3a3a3a';X.fillRect(2,-3,18,7); X.fillStyle='#666';X.fillRect(2,-2,18,2); X.fillStyle='#888';X.fillRect(18,-3,4,7); }
   else if(rw===1){ X.fillStyle='#5a3a1a';X.fillRect(2,-1,16,5); X.fillStyle='#222';X.fillRect(16,-3,6,9); X.fillStyle='#fa0';X.fillRect(21,-1,3,3); }
   else if(rw===2){ X.fillStyle='#33384a';X.fillRect(2,-3,20,8); X.fillStyle='#6cf';X.fillRect(2,0,20,2); X.fillStyle='#adf';X.fillRect(20,-4,3,10); }
-  else { X.fillStyle='#3a4a28';X.fillRect(2,-2,12,7); X.fillStyle='#5a7a3a';X.fillRect(2,-1,12,2); // body
+  else if(rw===3){ X.fillStyle='#3a4a28';X.fillRect(2,-2,12,7); X.fillStyle='#5a7a3a';X.fillRect(2,-1,12,2); // body
          X.save(); X.translate(13,-1); X.rotate(-0.5); X.fillStyle='#2a3a1a';X.fillRect(0,-4,11,8); X.fillStyle='#8ac850';X.fillRect(8,-4,3,8); X.restore(); // angled fat barrel
          X.fillStyle='#222';X.fillRect(4,4,5,4); }
+  else if(rw===4){ // 充能步槍 CHARGE RIFLE
+    X.fillStyle='#1a2a36';X.fillRect(2,-4,22,9); X.fillStyle='#2a4050';X.fillRect(2,-3,22,3); // 槍身
+    X.fillStyle='#a0e4ff';X.fillRect(22,-5,5,11); // 砲口發光體
+    const cpglow=player.chargeTimer/120;
+    if(cpglow>0){ X.fillStyle='rgba(160,228,255,'+(0.2+0.5*cpglow)+')'; X.fillRect(4,-2,15,4); } // 蓄能光線
+    X.fillStyle='#4a6a80'; X.fillRect(5,3,8,4); } // 彈匣
   X.restore(); }
 
 function drawMarine(){
@@ -1445,6 +1477,14 @@ function drawMarine(){
   }
   if(p.shield>0){ X.strokeStyle='rgba(120,200,255,'+(0.3+0.3*Math.sin(Date.now()/100))+')'; X.lineWidth=2; X.beginPath(); X.arc(cx,sy+22,25,0,6.28); X.stroke(); }
   if(p.blessing>0){ X.strokeStyle='rgba(255,215,80,'+(0.4+0.4*Math.sin(Date.now()/60))+')'; X.lineWidth=2; X.beginPath(); X.arc(cx,sy+22,29,0,6.28); X.stroke(); }
+  if(p.rw===4&&p.chargeTimer>0){
+    const cprog=p.chargeTimer/120;
+    X.strokeStyle='rgba(160,228,255,'+(0.3+0.5*cprog+0.2*Math.sin(Date.now()*0.02))+')';
+    X.lineWidth=1.5+cprog*2.5; X.beginPath(); X.arc(cx,sy+22,24+cprog*7,0,6.28); X.stroke();
+    if(cprog>=1){ X.strokeStyle='rgba(255,255,255,'+(0.3+0.35*Math.abs(Math.sin(Date.now()*0.025)))+')';
+      X.lineWidth=2; X.beginPath(); X.arc(cx,sy+22,33,0,6.28); X.stroke(); }
+    X.globalAlpha=1;
+  }
   if(p.dashTimer>0){
     const da=p.dashTimer/12, isUp=p.dashVy<0;
     X.strokeStyle=isUp?'rgba(255,215,80,'+da+')':'rgba(90,214,255,'+da+')';
@@ -1619,6 +1659,16 @@ function drawBullets(){
       const sp=Math.floor(titleT/3)%2;
       px(b.x-b.sz/2,b.y-b.sz/2,b.sz,b.sz,'#5a7a2e'); px(b.x-b.sz/2,b.y-b.sz/2,b.sz,2,b.color);
       px(sp?b.x-2:b.x,b.y-1,2,2,'#cfa'); }
+    else if(b.kind===4){ // 充能衝擊波
+      const bsx=Math.floor(b.x-camX), bcy=Math.floor(b.y+b.ph/2);
+      const pulse=0.55+0.35*Math.sin(Date.now()*0.015);
+      X.globalAlpha=0.15*pulse; X.fillStyle=b.color;
+      X.beginPath(); X.ellipse(bsx,bcy,b.pw*0.85,b.ph*0.85,0,0,6.28); X.fill();
+      X.globalAlpha=0.85; X.strokeStyle=b.color; X.lineWidth=3;
+      X.beginPath(); X.ellipse(bsx,bcy,b.pw/2,b.ph/2,0,0,6.28); X.stroke();
+      X.globalAlpha=0.7+0.3*pulse; X.fillStyle='#e0f8ff';
+      X.beginPath(); X.ellipse(bsx,bcy,b.pw*0.22,b.ph*0.22,0,0,6.28); X.fill();
+      X.globalAlpha=1; X.lineWidth=1; }
     else { px(b.x-b.sz/2,b.y-b.sz/2,b.sz,b.sz,b.color); px(b.x-1,b.y-1,2,2,'#fff'); } });
   ebullets.forEach(b=>{ px(b.x-3,b.y-3,6,6,b.c); px(b.x-1,b.y-1,2,2,'#fff'); });
 }
@@ -1650,6 +1700,14 @@ function drawHUD(){
   pxs(8,44,60,3,'#024');
   pxs(8,44,60*(1-player.dashCD/player.dashCDMax),3,dashReady?'#5ad6ff':'#1a6090');
   X.fillStyle=dashReady?'#5ad6ff':'#446'; X.fillText(dashReady?'衝刺 READY':'衝刺 CD',70,48);
+  // 充能步槍進度條（僅裝備時顯示）
+  if(player.rw===4){
+    const cprog=Math.min(1,player.chargeTimer/120), cFull=player.chargeTimer>=120;
+    pxs(8,52,60,4,'#112233');
+    pxs(8,52,60*cprog,4,cFull?(Math.floor(Date.now()/120)%2===0?'#ffffff':'#a0e4ff'):'#a0e4ff');
+    pxs(8,52,60,1,'rgba(160,228,255,0.35)');
+    X.fillStyle=cFull?'#fff':'#a0e4ff'; X.fillText(cFull?'充能 FULL!':'充能 CHARGE',70,56);
+  }
   X.textAlign='right'; X.font='8px "Courier New"';
   X.fillStyle=RANGED[player.rw].color; X.fillText('遠 '+RANGED[player.rw].name+' Lv'+player.rlvl[player.rw],VW-8,12);
   X.fillStyle=MELEE[player.mw].color; X.fillText('近 '+MELEE[player.mw].name+' Lv'+player.mlvl[player.mw],VW-8,24);
@@ -2052,7 +2110,8 @@ function startGame(){
   level=isSpecialLevel?5:0;
   victoryWaitingNext=false;
   score=0; player.hp=player.maxhp=100; player.shield=0; player.energy=0;
-  player.rw=0; player.mw=0; player.rlvl=[1,1,1,1]; player.mlvl=[1,1,1]; player.blessing=0; player.inv=0;
+  player.rw=0; player.mw=0; player.rlvl=[1,1,1,1,1]; player.mlvl=[1,1,1]; player.blessing=0; player.inv=0;
+  player.chargeTimer=0;
   player.meleeDmgMult=1; player.dashDmgMult=1; player.dmgMult=1; player.maxShield=60; player.maxEnergy=100;
   player.dashCDMax=52; player.diveReady=false; player.diving=false; player.diveHits=null;
   LEGIONS[selLegion].apply(player);
