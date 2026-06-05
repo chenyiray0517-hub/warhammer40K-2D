@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="為了帝皇">
 <meta name="theme-color" content="#05060a">
-<meta name="build" content="2026.06.03.2">
+<meta name="build" content="2026.06.05.1">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
@@ -201,6 +201,12 @@ const keys={left:false,right:false,jump:false,fire:false,melee:false,swR:false,s
 const kmap={ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',
   ArrowUp:'jump',KeyW:'jump',Space:'jump',KeyJ:'fire',KeyK:'melee',KeyU:'swR',KeyI:'swM',KeyY:'dash',KeyL:'lb',KeyQ:'quit',Enter:'start',KeyP:'pause',Escape:'pause'};
 addEventListener('keydown',e=>{ const k=kmap[e.code]; if(k){ e.preventDefault();
+  if(state==='TUTORIAL'){
+    if(k==='left'){ if(tutPage>0){tutPage--;sfx('E5');} return; }
+    if(k==='right'){ if(tutPage<TUT_PAGES_COUNT-1){tutPage++;sfx('E5');} return; }
+    if(k==='pause'||k==='quit'){ state='SELECT'; sfx('E5'); return; }
+    return;
+  }
   if(state==='LEADERBOARD'){ gotoTitle(); return; }
   if(k==='lb'){ if(state==='TITLE') gotoLeaderboard(); return; }
   if(k==='quit'){ if(paused){ if(quitConfirm) quitToTitle(); else quitConfirm=true; } return; }
@@ -249,14 +255,16 @@ function pauseAreaClick(pt){
 }
 CV.addEventListener('click',e=>{
   if(paused){ pauseAreaClick(e); return; }
-  if(state==='SELECT') selectClick(e);
+  if(state==='TUTORIAL') tutorialClick(e);
+  else if(state==='SELECT') selectClick(e);
   else if(state==='LEADERBOARD') gotoTitle();
   else if(state==='TITLE') titleAreaClick(e);
   else if(state==='GAMEOVER'||state==='VICTORY'){ if(victoryWaitingNext){victoryWaitingNext=false;titleT=600;}else gotoSelect(); }
 });
 CV.addEventListener('touchstart',e=>{
   if(paused){e.preventDefault();pauseAreaClick(e.touches[0]);return;}
-  if(state==='SELECT'){e.preventDefault();selectClick(e.touches[0]);}
+  if(state==='TUTORIAL'){e.preventDefault();tutorialClick(e.touches[0]);}
+  else if(state==='SELECT'){e.preventDefault();selectClick(e.touches[0]);}
   else if(state==='LEADERBOARD'){e.preventDefault();gotoTitle();}
   else if(state==='TITLE'){e.preventDefault();titleAreaClick(e.touches[0]);}
   else if(state==='GAMEOVER'||state==='VICTORY'){e.preventDefault();if(victoryWaitingNext){victoryWaitingNext=false;titleT=600;}else gotoSelect();}
@@ -514,6 +522,15 @@ let selLegion=0;
 let selMission=0; // 0=正常五關, 1=特殊任務
 let isSpecialLevel=false;
 let victoryWaitingNext=false; // 特殊任務勝利畫面等玩家確認才跳Phase3
+let tutPage=0; const TUT_PAGES_COUNT=6;
+function gotoTutorial(){ tutPage=0; state='TUTORIAL'; }
+function tutorialClick(pt){
+  const rect=CV.getBoundingClientRect();
+  const ix=(pt.clientX-rect.left)/rect.width*VW, iy=(pt.clientY-rect.top)/rect.height*VH;
+  if(iy<22&&ix>VW-46){ state='SELECT'; sfx('E5'); return; }
+  if(ix<40){ if(tutPage>0){tutPage--;sfx('E5');} }
+  else if(ix>VW-40){ if(tutPage<TUT_PAGES_COUNT-1){tutPage++;sfx('E5');} }
+}
 // 撤離序列狀態
 let extractPhase=0;   // 0=走向撤離點 1=飛船降臨 2=吊升 3=飛離
 let extractTimer=0;
@@ -534,6 +551,7 @@ function confirmSelect(){ if(!audioReady)initAudio().then(startGame); else start
 function selectClick(pt){
   const rect=CV.getBoundingClientRect();
   const ix=(pt.clientX-rect.left)/rect.width*VW, iy=(pt.clientY-rect.top)/rect.height*VH;
+  if(iy>=255 && iy<=267 && ix>=4 && ix<=84){ gotoTutorial(); sfx('E5'); return; } // 教學按鈕
   if(iy>=222 && iy<=252 && ix>=VW/2-90 && ix<=VW/2+90){ confirmSelect(); return; } // 確認出戰按鈕
   // 任務選擇按鈕
   if(iy>=203 && iy<=217){
@@ -1876,6 +1894,11 @@ function drawSelect(){
   X.strokeStyle=glow?'#ffbfae':'#ff9a8a'; X.lineWidth=1.5; X.strokeRect(bx+.5,by+.5,bw-1,bh-1);
   X.fillStyle='#ffe'; X.font='bold 13px "Courier New"'; X.fillText('⚔ 確認出戰 ⚔', VW/2, by+20);
   X.fillStyle='#778'; X.font='7px "Courier New"'; X.fillText(isMobile?'點卡片選擇 · 上下切換任務 · 下方按鈕出戰':'← → 選軍團  ↑↓ 切換任務  ENTER 出戰', VW/2, 260);
+  // 教學按鈕（左下角）
+  X.fillStyle='rgba(14,20,44,0.82)'; X.fillRect(4,255,80,12);
+  X.strokeStyle='rgba(80,120,200,0.55)'; X.lineWidth=1; X.strokeRect(4.5,255.5,79,11);
+  X.fillStyle='#6a8ab8'; X.font='bold 7px "Courier New"'; X.textAlign='center';
+  X.fillText('[?] 教學',44,264);
   X.textAlign='left';
 }
 // ----- 本地排行榜（存於玩家手機 localStorage；版本更新只清快取，不會清除分數） -----
@@ -2592,6 +2615,224 @@ function drawCamp(){
   if(msgTime>0){ X.fillStyle='rgba(255,255,255,'+Math.min(1,msgTime/30)+')'; X.font='bold 10px "Courier New"'; X.textAlign='center'; X.fillText(msgText,VW/2,80); X.textAlign='left'; }
 }
 
+//------------------------ TUTORIAL --------------------------
+function drawTutorial(){
+  titleT++;
+  X.fillStyle='#08091a'; X.fillRect(0,0,VW,VH);
+  for(let i=0;i<50;i++){const sx=(i*71+titleT*0.2)%VW,sy=(i*43)%VH;X.globalAlpha=0.1+0.22*((i*9)%10)/10;X.fillStyle='#fff';X.fillRect(sx,sy,1,1);}
+  X.globalAlpha=1;
+  X.strokeStyle='rgba(255,210,74,0.2)'; X.lineWidth=1; X.strokeRect(1,1,VW-2,VH-2);
+  // header
+  X.fillStyle='rgba(0,0,0,0.75)'; X.fillRect(0,0,VW,22);
+  X.strokeStyle='rgba(255,210,74,0.35)'; X.lineWidth=1; X.beginPath(); X.moveTo(0,22); X.lineTo(VW,22); X.stroke();
+  const pNames=['移動操控','戰鬥技巧','敵人圖鑑','掉落物品','遠程武器','近戰武器'];
+  X.textAlign='center';
+  X.fillStyle='#ffd24a'; X.font='bold 10px "Courier New"';
+  X.fillText('— 教學 ('+(tutPage+1)+'/'+TUT_PAGES_COUNT+') '+pNames[tutPage]+' —',VW/2,14);
+  // back button
+  X.fillStyle='rgba(160,30,30,0.6)'; X.fillRect(VW-46,1,44,20);
+  X.strokeStyle='rgba(220,80,80,0.55)'; X.lineWidth=1; X.strokeRect(VW-46,1,44,20);
+  X.fillStyle='#faa'; X.font='7px "Courier New"'; X.textAlign='center'; X.fillText('✕ 返回',VW-24,13);
+  // side nav
+  const la=tutPage>0?0.72:0.18, ra=tutPage<TUT_PAGES_COUNT-1?0.72:0.18;
+  X.globalAlpha=la; X.fillStyle='rgba(80,90,150,0.45)'; X.fillRect(0,22,22,VH-40);
+  X.fillStyle='#ccd'; X.font='bold 12px "Courier New"'; X.textAlign='center'; X.fillText('◀',11,VH/2+5);
+  X.globalAlpha=ra; X.fillStyle='rgba(80,90,150,0.45)'; X.fillRect(VW-22,22,22,VH-40);
+  X.fillStyle='#ccd'; X.fillText('▶',VW-11,VH/2+5);
+  X.globalAlpha=1;
+  // footer dots
+  X.fillStyle='rgba(0,0,0,0.6)'; X.fillRect(0,VH-18,VW,18);
+  for(let i=0;i<TUT_PAGES_COUNT;i++){
+    X.fillStyle=i===tutPage?'#ffd24a':'#334';
+    X.beginPath(); X.arc(VW/2+(i-(TUT_PAGES_COUNT-1)/2)*12,VH-9,i===tutPage?3.5:2.2,0,6.28); X.fill();
+  }
+  X.fillStyle='#445'; X.font='7px "Courier New"'; X.textAlign='right';
+  X.fillText(isMobile?'兩側點擊翻頁':'← → 翻頁  ESC/Q 返回選角',VW-26,VH-5);
+  X.textAlign='left';
+  const L=26, CT=VW/2;
+  // content switch
+  if(tutPage===0){
+    // ── 移動操控 ──
+    X.fillStyle='#5ad6ff'; X.font='bold 9px "Courier New"'; X.textAlign='left'; X.fillText('鍵盤 KEYBOARD',L,35);
+    const kc=[['← / → / A / D','左右移動'],['↑ / W / Space','跳躍'],['Y','衝刺（配合方向→橫衝，配合↑→上衝）'],['P / ESC','暫停遊戲']];
+    kc.forEach(([k,d],i)=>{
+      const y=47+i*14;
+      X.fillStyle='rgba(255,255,255,0.08)'; X.fillRect(L,y-9,92,11);
+      X.strokeStyle='rgba(255,255,255,0.14)'; X.lineWidth=0.5; X.strokeRect(L,y-9,92,11);
+      X.fillStyle='#ffd24a'; X.font='7px "Courier New"'; X.textAlign='left'; X.fillText(k,L+2,y);
+      X.fillStyle='#bbc'; X.font='7px "Courier New"'; X.fillText(d,L+96,y);
+    });
+    X.fillStyle='#ff9a3a'; X.font='bold 9px "Courier New"'; X.fillText('手機 MOBILE',L,112);
+    const mc=[['◀  ▶ 按鈕','左右移動'],['跳 按鈕','跳躍'],['衝刺 按鈕','衝刺（配合方向鍵）']];
+    mc.forEach(([k,d],i)=>{
+      const y=124+i*13;
+      X.fillStyle='rgba(255,255,255,0.08)'; X.fillRect(L,y-9,70,11);
+      X.strokeStyle='rgba(255,255,255,0.14)'; X.lineWidth=0.5; X.strokeRect(L,y-9,70,11);
+      X.fillStyle='#ffd24a'; X.font='7px "Courier New"'; X.textAlign='left'; X.fillText(k,L+2,y);
+      X.fillStyle='#bbc'; X.font='7px "Courier New"'; X.fillText(d,L+74,y);
+    });
+    // dash panel
+    X.fillStyle='rgba(18,36,80,0.55)'; X.fillRect(L,163,VW-52,60);
+    X.strokeStyle='rgba(90,160,255,0.45)'; X.lineWidth=1; X.strokeRect(L+.5,163.5,VW-53,59);
+    X.fillStyle='#5ad6ff'; X.font='bold 8px "Courier New"'; X.textAlign='center';
+    X.fillText('★ 衝刺 DASH ★',CT,175);
+    X.fillStyle='#9ab'; X.font='7px "Courier New"';
+    X.fillText('衝刺中有 20 幀無敵，並對接觸敵人造成 120 傷害',CT,187);
+    X.fillText('橫衝: Y+方向鍵   上衝: Y+↑   冷卻約 1 秒',CT,199);
+    X.fillText('暗黑天使天賦: 衝刺傷+50%、冷卻縮半',CT,211);
+    X.fillStyle='#c8a';
+    X.fillText('血天使特殊: 上衝後半空中按 K/近戰 = 天罰俯衝 250傷！',CT,223);
+  }
+  else if(tutPage===1){
+    // ── 戰鬥技巧 ──
+    X.fillStyle='#e23a3a'; X.font='bold 9px "Courier New"'; X.textAlign='left'; X.fillText('攻擊操控 ATTACK',L,35);
+    const ac=[['J / 射擊','發射當前遠程武器','#ffa0a0'],['K / 近戰','揮出當前近戰武器','#ffa0a0'],['U / 換槍','切換遠程武器（5種）','#ffd24a'],['I / 換刃','切換近戰武器（3種）','#ffd24a']];
+    ac.forEach(([k,d,col],i)=>{
+      const y=47+i*14;
+      X.fillStyle='rgba(255,255,255,0.08)'; X.fillRect(L,y-9,82,11);
+      X.strokeStyle='rgba(255,255,255,0.14)'; X.lineWidth=0.5; X.strokeRect(L,y-9,82,11);
+      X.fillStyle='#ffd24a'; X.font='7px "Courier New"'; X.textAlign='left'; X.fillText(k,L+2,y);
+      X.fillStyle=col; X.font='7px "Courier New"'; X.fillText(d,L+86,y);
+    });
+    // charge rifle panel
+    X.fillStyle='rgba(8,26,48,0.6)'; X.fillRect(L,108,VW-52,42);
+    X.strokeStyle='rgba(160,228,255,0.4)'; X.lineWidth=1; X.strokeRect(L+.5,108.5,VW-53,41);
+    X.fillStyle='#a0e4ff'; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText('充能步槍 CHARGE RIFLE',L+4,120);
+    X.fillStyle='#7ab'; X.font='7px "Courier New"';
+    X.fillText('長按 J/射擊 鍵蓄力約 2 秒，進度條滿閃白後鬆手',L+4,131);
+    X.fillText('→ 釋放與玩家等大的衝擊波，穿透場上所有敵人，傷害 300',L+4,142);
+    pxs(L+4,145,VW-62,4,'rgba(0,40,60,0.6)');
+    pxs(L+4,145,(VW-62)*0.7,4,'#a0e4ff');
+    pxs(L+4,145,VW-62,1,'rgba(160,228,255,0.3)');
+    X.fillStyle='#a0e4ff'; X.font='6px "Courier New"'; X.textAlign='right'; X.fillText('蓄力進度',VW-28,149);
+    // upgrade panel
+    X.fillStyle='rgba(18,28,8,0.5)'; X.fillRect(L,156,VW-52,38);
+    X.strokeStyle='rgba(180,230,80,0.3)'; X.lineWidth=1; X.strokeRect(L+.5,156.5,VW-53,37);
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText('升級系統 UPGRADE',L+4,168);
+    X.fillStyle='#9ab'; X.font='7px "Courier New"';
+    X.fillText('撿 ⚡ 能量核 或 ▣ 武器晶片 → 能量條增加',L+4,180);
+    X.fillText('能量滿 100 → 自動升級當前武器（最高 Lv5，各項數值提升）',L+4,192);
+    // boss panel
+    X.fillStyle='rgba(70,8,8,0.5)'; X.fillRect(L,200,VW-52,32);
+    X.strokeStyle='rgba(220,60,60,0.38)'; X.lineWidth=1; X.strokeRect(L+.5,200.5,VW-53,31);
+    X.fillStyle='#f55'; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText('⚠ 大魔王 BOSS',L+4,212);
+    X.fillStyle='#9ab'; X.font='7px "Courier New"';
+    X.fillText('每關末端 Boss，HP 降至 2/3 和 1/3 時強化，底部紅條=大絕蓄力警告',L+4,222);
+    X.fillText('Boss 蓄力完成時閃避或反擊，大絕結束後有短暫攻擊空窗',L+4,232);
+  }
+  else if(tutPage===2){
+    // ── 敵人圖鑑 ──
+    X.fillStyle='#e23a3a'; X.font='bold 9px "Courier New"'; X.textAlign='center'; X.fillText('敵人圖鑑 ENEMY BESTIARY',CT,34);
+    const ei=[
+      {n:'爬行者',en:'CRAWLER', c:'#7a3050',lc:'#9a4060',eyes:'#fc6',desc:'貼地高速衝撞，近戰'},
+      {n:'直立者',en:'UPRIGHT', c:'#8a4060',lc:'#aa5070',eyes:'#fc4',desc:'直立突擊，近戰傷高'},
+      {n:'感染者',en:'INFECTED',c:'#5a7a3a',lc:'#6a9a4a',eyes:'#f44',desc:'緩速，雙臂近身'},
+      {n:'噴射者',en:'SPITTER', c:'#6a8a3a',lc:'#8aaa50',eyes:'#fc4',desc:'遠程酸液，保持距離'},
+      {n:'蠻獸',  en:'BRUTE',  c:'#7a4a2e',lc:'#9a6038',eyes:'#f63',desc:'重甲，踩踏+拋投，血厚'},
+      {n:'飛行者',en:'FLYER',  c:'#8a4aa0',lc:'#a060c0',eyes:'#f6a',desc:'空中俯衝+射擊'},
+    ];
+    const cw=138,ch=70,cols=[L+4,L+4+cw+4,L+4+cw*2+8],rows=[43,118];
+    ei.forEach((e,i)=>{
+      const gx=cols[i%3],gy=rows[Math.floor(i/3)];
+      X.fillStyle='rgba(255,255,255,0.04)'; X.fillRect(gx,gy,cw,ch);
+      X.strokeStyle=e.c; X.lineWidth=1; X.strokeRect(gx+.5,gy+.5,cw-1,ch-1);
+      const bx=gx+6,by=gy+8,bw=i===4?36:22,bh=i===0?14:i===4?40:28;
+      X.fillStyle=e.c; X.fillRect(bx,by,bw,bh);
+      X.fillStyle=e.lc; X.fillRect(bx,by,bw,4);
+      X.fillStyle=e.eyes;
+      if(i===4){X.fillRect(bx+4,by+10,4,3);X.fillRect(bx+bw-8,by+10,4,3);}
+      else {X.fillRect(bx+2,by+6,3,3);X.fillRect(bx+bw-5,by+6,3,3);}
+      if(i===5){X.fillStyle='rgba(160,96,192,0.55)';X.fillRect(bx-8,by+4,8,14);X.fillRect(bx+bw,by+4,8,14);}
+      X.fillStyle='#ddd'; X.font='bold 7px "Courier New"'; X.textAlign='center'; X.fillText(e.n,gx+cw/2,gy+52);
+      X.fillStyle='#556'; X.font='6px "Courier New"'; X.fillText(e.en,gx+cw/2,gy+61);
+      X.fillStyle='#9ab'; X.font='6px "Courier New"'; X.fillText(e.desc,gx+cw/2,gy+ch-2);
+    });
+    X.fillStyle='rgba(70,8,8,0.55)'; X.fillRect(L,196,VW-52,44);
+    X.strokeStyle='rgba(220,60,60,0.45)'; X.lineWidth=1; X.strokeRect(L+.5,196.5,VW-53,43);
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.textAlign='center'; X.fillText('⚔ 每關末端 BOSS ⚔',CT,208);
+    X.fillStyle='#aaa'; X.font='7px "Courier New"';
+    X.fillText('噬肉巢母 → 裂顎屠夫 → 瘟疫宿主 → 影刃潛獵者 → 吞星巢皇',CT,220);
+    X.fillText('Boss 三階段行為，HP越低越強，留意大絕招紅條警告！',CT,230);
+    X.fillStyle='#f55'; X.font='7px "Courier New"'; X.fillText('特殊任務終Boss：焦血毀滅者 BLOODCRUSHER OVERLORD',CT,240);
+  }
+  else if(tutPage===3){
+    // ── 掉落物品 ──
+    X.fillStyle='#9ec'; X.font='bold 9px "Courier New"'; X.textAlign='center'; X.fillText('掉落物品 PICKUPS',CT,34);
+    const di=[
+      {icon:'+', col:'#ff5a5a',n:'急救包 MEDKIT',     desc:'撿取後 HP +30，補充生命值'},
+      {icon:'⚡',col:'#ffd24a',n:'能量核 ENERGY',     desc:'能量 +40，累積至 100 自動升武器'},
+      {icon:'◇', col:'#5ad6ff',n:'護盾碎片 SHIELD',   desc:'護盾 +40（吸收傷害，上限 60）'},
+      {icon:'▣', col:'#b06aff',n:'武器晶片 WEAPON',   desc:'隨機升級一把武器 +1 等級'},
+      {icon:'≡', col:'#ff9a3a',n:'彈藥強化 AMMO',     desc:'持續 3 秒雙倍射速'},
+      {icon:'★', col:'#ffd24a',n:'帝皇恩賜 BLESSING', desc:'5 秒無敵+雙倍火力！稀有 1.5%'},
+    ];
+    di.forEach((d,i)=>{
+      const gy=44+i*32;
+      X.fillStyle=d.col; X.globalAlpha=0.1; X.beginPath(); X.arc(L+8,gy+6,11,0,6.28); X.fill(); X.globalAlpha=1;
+      X.fillStyle=d.col; X.fillRect(L+2,gy,12,12);
+      X.fillStyle='#000'; X.fillRect(L+3,gy+1,10,10);
+      X.fillStyle=d.col; X.font='9px "Courier New"'; X.textAlign='center'; X.fillText(d.icon,L+8,gy+10);
+      X.fillStyle='#ddd'; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText(d.n,L+18,gy+6);
+      X.fillStyle='#778'; X.font='7px "Courier New"'; X.fillText(d.desc,L+18,gy+17);
+    });
+    X.fillStyle='rgba(20,40,20,0.5)'; X.fillRect(L,238,VW-52,12);
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.textAlign='center';
+    X.fillText('掉落物上下漂浮，走過去自動撿取，★帝皇恩賜 最為珍貴！',CT,247);
+  }
+  else if(tutPage===4){
+    // ── 遠程武器 ──
+    X.fillStyle='#ffa0a0'; X.font='bold 9px "Courier New"'; X.textAlign='center'; X.fillText('遠程武器 RANGED WEAPONS',CT,34);
+    X.fillStyle='#556'; X.font='7px "Courier New"'; X.fillText('升級：撿武器晶片▣ / 能量滿100 / 補給站武器庫  最高 Lv5',CT,43);
+    const rw=[
+      {rw:0,col:'#ffd24a',n:'爆彈槍 BOLTER',         tip:'均衡主力，高Lv→多顆彈同時射出'},
+      {rw:1,col:'#ff7a1a',n:'火焰槍 FLAMER',         tip:'近程散射，高Lv→散射數增加'},
+      {rw:2,col:'#5ad6ff',n:'電磁砲 RAILGUN',        tip:'高傷穿透，貫穿所有敵人'},
+      {rw:3,col:'#a8e063',n:'槍榴彈 GRENADE',        tip:'拋射落地爆炸，範圍傷害'},
+      {rw:4,col:'#a0e4ff',n:'充能步槍 CHARGE RIFLE', tip:'長按集氣→衝擊波穿透全場 傷300'},
+    ];
+    rw.forEach((w,i)=>{
+      const gy=52+i*37;
+      X.fillStyle='rgba(255,255,255,0.04)'; X.fillRect(L,gy-4,VW-52,32);
+      X.strokeStyle='rgba(100,100,120,0.28)'; X.lineWidth=0.5; X.strokeRect(L+.5,gy-3.5,VW-53,31);
+      drawGun(L+46,gy+10,1,w.rw);
+      X.fillStyle=w.col; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText(w.n,L+74,gy+5);
+      X.fillStyle='#778'; X.font='7px "Courier New"'; X.fillText(w.tip,L+74,gy+17);
+      X.fillStyle='#444'; X.font='6px "Courier New"'; X.textAlign='right'; X.fillText('Lv1~5',VW-28,gy+5);
+    });
+  }
+  else if(tutPage===5){
+    // ── 近戰武器 ──
+    X.fillStyle='#9fe8ff'; X.font='bold 9px "Courier New"'; X.textAlign='center'; X.fillText('近戰武器 MELEE WEAPONS',CT,34);
+    X.fillStyle='#556'; X.font='7px "Courier New"'; X.fillText('升級：同遠程武器，最高 Lv5，等級越高傷害倍率越高',CT,43);
+    const mw=[
+      {mw:0,col:'#9fe8ff',n:'動力劍 POWER SWORD',   stats:'傷30  攻速快  觸及42px',tip:'輕快連擊型，機動性佳，適合對付大量普通敵人'},
+      {mw:1,col:'#ffcf5a',n:'動力錘 THUNDER HAMMER', stats:'傷55  攻速慢  大擊退', tip:'重擊型，一擊打飛並打斷敵人動作，Boss 剋星'},
+      {mw:2,col:'#ff8a4a',n:'動力拳 POWER FIST',    stats:'傷42  攻速最快 觸及32px',tip:'均衡型，速度與傷害兼具，適合近身纏鬥'},
+    ];
+    mw.forEach((w,i)=>{
+      const gy=52+i*57;
+      X.fillStyle='rgba(255,255,255,0.04)'; X.fillRect(L,gy-4,VW-52,51);
+      X.strokeStyle=w.col; X.lineWidth=0.5; X.globalAlpha=0.38; X.strokeRect(L+.5,gy-3.5,VW-53,50); X.globalAlpha=1;
+      X.save(); X.translate(L+8,gy+18); X.rotate(-0.15);
+      if(w.mw===0){X.fillStyle=w.col;X.fillRect(0,-3,42,6);X.fillStyle='#fff';X.fillRect(0,-2,42,2);}
+      else if(w.mw===1){X.fillStyle='#888';X.fillRect(0,-3,36,6);X.fillStyle=w.col;X.fillRect(0,-2,34,4);X.fillStyle='#888';X.fillRect(24,-11,14,22);X.fillStyle=w.col;X.fillRect(25,-10,12,20);}
+      else{X.fillStyle=w.col;X.fillRect(0,-3,32,6);X.fillRect(22,-9,14,18);X.fillStyle='#fff';X.fillRect(24,-7,10,4);}
+      X.restore();
+      X.fillStyle=w.col; X.font='bold 8px "Courier New"'; X.textAlign='left'; X.fillText(w.n,L+60,gy+5);
+      X.fillStyle='#aaa'; X.font='7px "Courier New"'; X.fillText(w.stats,L+60,gy+16);
+      X.fillStyle='#778'; X.font='7px "Courier New"'; X.fillText(w.tip,L+60,gy+27);
+      pxs(L+60,gy+33,50,3,'#222'); pxs(L+60,gy+33,10,3,w.col);
+      X.fillStyle='#444'; X.font='6px "Courier New"'; X.textAlign='right'; X.fillText('Lv1~5',L+60+52,gy+37);
+    });
+    X.fillStyle='rgba(20,30,60,0.5)'; X.fillRect(L,224,VW-52,20);
+    X.strokeStyle='rgba(90,160,255,0.3)'; X.lineWidth=1; X.strokeRect(L+.5,224.5,VW-53,19);
+    X.fillStyle='#ffd24a'; X.font='bold 8px "Courier New"'; X.textAlign='center';
+    X.fillText('衝刺 120傷  ·  血天使近戰+50%  ·  天罰俯衝250傷',CT,233);
+    X.fillStyle='#9ab'; X.font='7px "Courier New"';
+    X.fillText('近戰可擊退敵人，中斷敵人攻擊動作，Boss 戰多用近戰可穩定輸出',CT,243);
+  }
+  X.textAlign='left';
+}
 //------------------------ LOOP ------------------------------
 function drawPauseOverlay(){
   X.fillStyle='rgba(0,0,0,0.72)'; X.fillRect(0,0,VW,VH); X.textAlign='center';
@@ -2629,9 +2870,10 @@ function loop(){
   const playing=(state==='PLAY'||state==='TRANS'||state==='CAMP'||state==='EXTRACT');
   pauseBtn.style.display=playing?'block':'none';
   if(isMobile)document.getElementById('touch').style.display=(state==='PLAY'||state==='TRANS'||state==='CAMP'||(state==='EXTRACT'&&extractPhase===0))?'block':'none';
-  if(audioReady && (state==='TITLE'||state==='SELECT'||state==='CAMP'||state==='LEADERBOARD') && musicMode!=='menu') setMusic('menu');
+  if(audioReady && (state==='TITLE'||state==='SELECT'||state==='TUTORIAL'||state==='CAMP'||state==='LEADERBOARD') && musicMode!=='menu') setMusic('menu');
   if(state==='TITLE'){ drawTitle(); }
   else if(state==='SELECT'){ drawSelect(); }
+  else if(state==='TUTORIAL'){ drawTutorial(); }
   else if(state==='LEADERBOARD'){ drawLeaderboardScreen(); }
   else if(state==='CAMP'){ drawCamp(); if(paused)drawPauseOverlay(); }
   else if(state==='EXTRACT'){ drawBackground(); drawPlatforms(); drawParticles(); drawShockwaves(); drawExtractionZone(); drawShip(); drawAlly(); drawDashTrail(); drawMarine(); drawExtractHUD(); if(paused)drawPauseOverlay(); }
