@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="為了帝皇">
 <meta name="theme-color" content="#05060a">
-<meta name="build" content="2026.06.05.1">
+<meta name="build" content="2026.06.05.2">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
@@ -222,7 +222,7 @@ addEventListener('keydown',e=>{
   if(e.code==='ArrowLeft'||e.code==='KeyA'){ selLegion=(selLegion+LEGIONS.length-1)%LEGIONS.length; sfx('E5'); }
   else if(e.code==='ArrowRight'||e.code==='KeyD'){ selLegion=(selLegion+1)%LEGIONS.length; sfx('E5'); }
   else if(e.code==='ArrowUp'||e.code==='ArrowDown'||e.code==='Tab'||e.code==='KeyS'||e.code==='KeyW'){
-    selMission=(selMission+1)%2; sfx('E5'); e.preventDefault(); }
+    selMission=(selMission+1)%3; sfx('E5'); e.preventDefault(); }
 });
 function bindBtn(id,key,onPress){ const el=document.getElementById(id);
   const dn=e=>{e.preventDefault();keys[key]=true;if(onPress)onPress();};
@@ -475,10 +475,11 @@ const BOSSES=[
   {name:'瘟疫宿主 PLAGUEBOUND HERALD',  col:'#6db33f',hp:13600},
   {name:'影刃潛獵者 SHADOWBLADE STALKER',col:'#5a4f9e',hp:24500},
   {name:'吞星巢皇 STARSUNDER HIVE-TYRANT',col:'#d44',hp:44000},
-  {name:'焦血毀滅者 BLOODCRUSHER OVERLORD',col:'#c84010',hp:24000}
+  {name:'焦血毀滅者 BLOODCRUSHER OVERLORD',col:'#c84010',hp:24000},
+  {name:'巢翼暴君 WINGED HIVE TYRANT',    col:'#6020c0',hp:18000}
 ];
 const LV_TINT=['#1a1228','#241018','#101e12','#0e1226','#2a0810'];
-const LV_LEN=[7800,10140,11660,13410,15420,12000];
+const LV_LEN=[7800,10140,11660,13410,15420,12000,9000];
 
 // per-level visual theme
 const THEMES=[
@@ -493,7 +494,9 @@ const THEMES=[
   {name:'巢皇巢穴 HIVE SANCTUM', sky:['#1a0408','#48101a','#10040a'], ground:'#3a1020', groundDark:'#260a14',
    horizon:'rgba(220,40,60,0.40)', atm:'spore', atmCol:'#f6a', deco:'hive'},
   {name:'蟲族侵攻 TYRANID ASSAULT', sky:['#0c0810','#200c2e','#060414'], ground:'#2a1818', groundDark:'#1a0e10',
-   horizon:'rgba(180,60,200,0.32)', atm:'spore', atmCol:'#c8a', deco:'hive'}
+   horizon:'rgba(180,60,200,0.32)', atm:'spore', atmCol:'#c8a', deco:'hive'},
+  {name:'虛空獵殺 VOID HUNT', sky:['#000005','#04000e','#000208'], ground:'#0c0814', groundDark:'#060410',
+   horizon:'rgba(60,20,140,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'void'}
 ];
 let atmParts=[];
 
@@ -521,6 +524,7 @@ const LEGIONS=[
 let selLegion=0;
 let selMission=0; // 0=正常五關, 1=特殊任務
 let isSpecialLevel=false;
+let isTerminalMission=false;
 let victoryWaitingNext=false; // 特殊任務勝利畫面等玩家確認才跳Phase3
 let tutPage=0; const TUT_PAGES_COUNT=6;
 function gotoTutorial(){ tutPage=0; state='TUTORIAL'; }
@@ -555,8 +559,9 @@ function selectClick(pt){
   if(iy>=222 && iy<=252 && ix>=VW/2-90 && ix<=VW/2+90){ confirmSelect(); return; } // 確認出戰按鈕
   // 任務選擇按鈕
   if(iy>=203 && iy<=217){
-    if(ix>=VW/2-112 && ix<=VW/2-4){ selMission=0; sfx('E5'); return; }
-    if(ix>=VW/2+4   && ix<=VW/2+112){ selMission=1; sfx('E5'); return; }
+    if(ix>=VW/2-111 && ix<=VW/2-41){ selMission=0; sfx('E5'); return; }
+    if(ix>=VW/2-35  && ix<=VW/2+35){ selMission=1; sfx('E5'); return; }
+    if(ix>=VW/2+41  && ix<=VW/2+111){ selMission=2; sfx('E5'); return; }
   }
   for(let i=0;i<LEGIONS.length;i++){ const x=19+i*90;
     if(ix>=x && ix<=x+82 && iy>=44 && iy<=194){ if(i===selLegion)confirmSelect(); else { selLegion=i; sfx('E5'); } return; } }
@@ -636,6 +641,30 @@ function buildSpecialLevel(){
         fireCD:0,meleeCD:0,meleeAnim:0,walk:0,inv:0,t:0,alive:true,respawnTimer:0};
   setMusic('stage');
 }
+function buildTerminalLevel(){
+  bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
+  boss=null;bossIntro=0;levelTimer=0;
+  player.x=60;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;
+  player.hp=Math.min(player.maxhp,player.hp+25);player.inv=60;player.blessing=0;
+  camX=0; buildBackground();
+  const len=LV_LEN[6]; let pxp=200;
+  while(pxp<len-300){
+    const tier=Math.floor(Math.random()*3),py=GROUND-(36+tier*26),pw=46+Math.floor(Math.random()*3)*22;
+    platforms.push({x:pxp,y:py,w:pw});
+    if(Math.random()<.4)platforms.push({x:pxp+pw+34,y:py-34,w:46});
+    pxp+=140+Math.random()*170;
+  }
+  for(let i=0;i<Math.round(len/68);i++){
+    const ex=280+Math.random()*(len-460); const r=Math.random();
+    let type;
+    if(r<0.07)type='brute';
+    else{const r2=Math.random();type=r2<.30?'crawler':r2<.55?'upright':r2<.74?'infected':r2<.88?'spitter':'flyer';}
+    spawnEnemy(type,ex,GROUND);
+  }
+  window._bossSpawned=false;
+  stageBanner=160;
+  setMusic('stage');
+}
 function buildCamp(){
   bullets=[];ebullets=[];enemies=[];drops=[];pools=[];boss=null;bossIntro=0;
   campT=0;campShopMsg='';campMsgTime=0;
@@ -653,7 +682,7 @@ function buildCamp(){
   state='CAMP';
 }
 let stageBanner=0;
-const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27]; // per-stage; index 5 = special mission
+const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27,1.27]; // per-stage; index 5 = special, 6 = terminal
 function spawnEnemy(type,x,g){
   const b={x:x,y:0,vx:0,vy:0,type:type,hitFlash:0,t:Math.random()*6,dead:false};
   if(type==='crawler'){ Object.assign(b,{w:30,h:18,hp:61,dmg:16,spd:0.7,touch:true}); }
@@ -670,8 +699,9 @@ function spawnEnemy(type,x,g){
 }
 function spawnBoss(){
   const b=BOSSES[level];
-  boss={x:camX+VW-100,y:GROUND-100,w:80,h:80,hp:b.hp,maxhp:b.hp,name:b.name,col:b.col,
-        t:0,phase:0,shootCD:60,hitFlash:0,baseY:GROUND-100,level:level,tele:0,charge:0,dashV:0,
+  const flyY=level===6?GROUND-130:GROUND-100;
+  boss={x:camX+VW-100,y:flyY,w:80,h:80,hp:b.hp,maxhp:b.hp,name:b.name,col:b.col,
+        t:0,phase:0,shootCD:60,hitFlash:0,baseY:flyY,level:level,tele:0,charge:0,dashV:0,
         ultCD:480,ultWind:0};
   bossIntro=140; setMusic('boss');
 }
@@ -785,6 +815,12 @@ function defeatBoss(){ score+=2000;
     flashMsg('前往撤離點！'); sfx('C5','4n');
     if(audioReady) setMusic('menu');
     state='EXTRACT'; return;
+  }
+  if(isTerminalMission){
+    enemies=[];drops=[];ebullets=[];pools=[];
+    flashMsg('任務完成！帝皇護佑！'); sfx('C5','4n');
+    recordScore(true); titleT=0; victoryParts=[];
+    state='VICTORY'; stopMusic(); return;
   }
   buildCamp(); }
 function maybeDrop(x,y){ const r=Math.random(); let type=null;
@@ -1112,6 +1148,33 @@ function update(){
             sfx('E3','32n');
           }
         }
+      } else if(boss.level===6){
+        // 巢翼暴君: 飛行近戰型 — 衝刺至玩家、爪擊、靈能爆發
+        const tier=hpr>0.66?0:hpr>0.33?1:2;
+        boss.y=boss.baseY+Math.sin(boss.t*2.5)*(tier===2?6:16);
+        if(boss.charge>0){
+          boss.x+=boss.dashV;
+          if(boss.x<camX+20){boss.x=camX+20;boss.dashV*=-0.5;boss.charge=0;}
+          if(boss.x>camX+VW-boss.w-20){boss.x=camX+VW-boss.w-20;boss.dashV*=-0.5;boss.charge=0;}
+        } else {
+          const driftSpd=[0.7,1.1,1.5][tier];
+          const tx6=Math.max(camX+40,Math.min(camX+VW-boss.w-40,px0-boss.w/2));
+          boss.x+=Math.sign(tx6-boss.x)*driftSpd;
+          if(boss.shootCD<=0){
+            const d=Math.hypot(dx,dy)||1;
+            if(tier===0){ boss.shootCD=90;
+              for(let i=-1;i<=1;i++){const a=Math.atan2(dy,dx)+i*0.32;ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*4.5,vy:Math.sin(a)*4.5,dmg:20,life:110,c:'#c080ff'});}
+              sfx('D4','16n'); if(Math.random()<0.4){boss.charge=50;boss.dashV=Math.sign(dx||1)*7;}
+            } else if(tier===1){ boss.shootCD=65;
+              for(let i=-2;i<=2;i++){const a=Math.atan2(dy,dx)+i*0.28;ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*5,vy:Math.sin(a)*5,dmg:22,life:110,c:'#c080ff'});}
+              sfx('D3','16n'); boss.charge=55; boss.dashV=Math.sign(dx||1)*8;
+              if(Math.random()<0.28&&enemies.length<35){const ef2={x:boss.x+20,y:boss.y,vx:0,vy:0,type:'flyer',hitFlash:0,t:0,dead:false,w:30,h:22,hp:Math.round(44*1.27),maxhp:Math.round(44*1.27),dmg:16,spd:1.1,touch:true,flyBase:boss.y+20,bobAmp:16,bobSp:0.06,shootCD:90,swoop:0,wing:Math.random()*6.28};enemies.push(ef2);}
+            } else { boss.shootCD=38;
+              for(let i=0;i<8;i++){const a=Math.atan2(dy,dx)+(i-3.5)*0.25;ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a)*5.5,vy:Math.sin(a)*5.5,dmg:24,life:120,c:'#e060ff'});}
+              sfx('E3','32n'); boss.charge=45; boss.dashV=Math.sign(dx||1)*9;
+            }
+          }
+        }
       } else {
         // 吞星巢皇: MULTI-PHASE — spiral barrage + spawns + sweeping beam by hp tier
         const tx=Math.max(camX+VW-110,px0+100); boss.x+=Math.sign(tx-boss.x)*0.5;
@@ -1159,6 +1222,12 @@ function update(){
             boss.x=Math.max(camX+20,Math.min(camX+VW-boss.w-20,px0+(Math.random()<0.5?-130:130)));
             boss.baseY=GROUND-100-Math.random()*30; boss.tele=1;
             for(let k=0;k<22;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8,life:24,c:'#c8a'});
+          } else if(boss.level===6){
+            // 巢翼暴君·翼暴咆哮：12向翼刃彈 + 極速長衝刺
+            for(let i=0;i<12;i++){const a=(i/12)*6.28;ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*4,vy:Math.sin(a)*4,dmg:26,life:200,c:'#c080ff'});}
+            boss.charge=120; boss.dashV=Math.sign(px0-boss.x)*11||-11;
+            for(let k=0;k<30;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*10,life:30,c:k%2?'#c080ff':'#e0b0ff'});
+            sfx('A2','4n');
           } else if(boss.level===5){
             // 焦血毀滅者·絕命踩踏：3排地面衝擊波 + 5池 + 狂衝
             const bx2=boss.x+boss.w/2;
@@ -1347,6 +1416,35 @@ function drawDeco(T){
       X.fillStyle='#2a0a14'; X.beginPath(); X.moveTo(bx,GROUND); X.lineTo(bx+b.w*0.5,topY-Math.sin(titleT/25+b.x)*4); X.lineTo(bx+b.w,GROUND); X.closePath(); X.fill();
       X.fillStyle='rgba(255,50,80,'+(0.2+0.15*Math.sin(titleT/18+b.x))+')'; X.beginPath(); X.arc(bx+b.w*0.5,GROUND-b.h*0.35,5,0,6.28); X.fill();
       X.fillStyle='#d8c0b0'; X.fillRect(bx+b.w*0.5-1,topY,2,b.h*0.3); });
+  } else if(T.deco==='void'){
+    // 帝國軍艦剪影 + 蟲族生物艦 + 遠方爆炸閃光
+    for(let i=0;i<3;i++){
+      const wx=((i*440+180-camX*(0.04+i*0.025))%1500+1500)%1500-120;
+      const wy=12+i*14; const sc=1-i*0.22;
+      X.fillStyle='rgba(70,90,135,'+(0.55-i*0.12)+')';
+      X.fillRect(wx,wy,Math.ceil(130*sc),Math.ceil(12*sc));
+      X.fillRect(wx+Math.ceil(18*sc),wy-Math.ceil(7*sc),Math.ceil(65*sc),Math.ceil(7*sc));
+      X.fillRect(wx+Math.ceil(36*sc),wy-Math.ceil(13*sc),Math.ceil(28*sc),Math.ceil(6*sc));
+      X.fillStyle='rgba(255,200,80,0.65)';
+      X.fillRect(wx+Math.ceil(100*sc),wy+Math.ceil(3*sc),Math.max(2,Math.ceil(4*sc)),Math.max(2,Math.ceil(4*sc)));
+    }
+    for(let i=0;i<2;i++){
+      const bx3=((i*600+360-camX*(0.07+i*0.03))%1400+1400)%1400-80;
+      const by3=38+i*20; const sr=30-i*8;
+      X.fillStyle='rgba(90,20,130,0.45)';
+      X.beginPath(); X.ellipse(bx3,by3,sr,Math.ceil(sr*0.38),0,0,6.28); X.fill();
+      X.beginPath(); X.ellipse(bx3+sr*0.5,by3-3,Math.ceil(sr*0.45),Math.ceil(sr*0.28),0.35,0,6.28); X.fill();
+      X.fillStyle='rgba(200,80,255,0.18)';
+      X.beginPath(); X.ellipse(bx3,by3,sr-2,Math.ceil(sr*0.32),0,0,6.28); X.fill();
+    }
+    if(Math.floor(titleT/20)%4===0){
+      const fx=((titleT*4+80)%VW), fy=16+Math.sin(titleT*0.28)*26;
+      const fp=(titleT%20)/20;
+      X.globalAlpha=Math.max(0,0.55*(1-fp));
+      X.fillStyle='#ffe080'; X.beginPath(); X.arc(fx,fy,3+fp*9,0,6.28); X.fill();
+      X.fillStyle='rgba(255,130,40,0.35)'; X.beginPath(); X.arc(fx,fy,10+fp*16,0,6.28); X.fill();
+      X.globalAlpha=1;
+    }
   }
 }
 
@@ -1648,6 +1746,29 @@ function drawBoss(){
   else if(b.level===2){ X.fillStyle='#7d4'; for(let i=0;i<6;i++)X.fillRect(bx+10+i*11,by+b.h-4,5,7); }
   else if(b.level===3){ X.fillRect(bx-12,by+12,18,5); X.fillRect(bx+b.w-6,by+12,18,5); }
   else if(b.level===4){ X.fillStyle='#fdd'; for(let i=0;i<8;i++)X.fillRect(bx+12+i*7,by-9,3,11); X.fillStyle=shade(b.col,0.7); X.fillRect(bx-12,by+24,18,8); X.fillRect(bx+b.w-6,by+24,18,8); }
+  else if(b.level===6){ // 巢翼暴君：展翅動畫 + 冠刺 + 爪
+    const wf=Math.sin(b.t*4)*18;
+    const wc=flash?'#fff':shade(b.col,0.65);
+    // 左翼兩段
+    X.fillStyle=wc;
+    X.beginPath(); X.moveTo(bx+8,by+18); X.lineTo(bx-38,by+wf-22); X.lineTo(bx-20,by+wf+2); X.lineTo(bx+8,by+36); X.closePath(); X.fill();
+    X.beginPath(); X.moveTo(bx+8,by+34); X.lineTo(bx-26,by+wf+8); X.lineTo(bx-10,by+wf+26); X.lineTo(bx+8,by+54); X.closePath(); X.fill();
+    // 右翼兩段
+    X.beginPath(); X.moveTo(bx+b.w-8,by+18); X.lineTo(bx+b.w+38,by+wf-22); X.lineTo(bx+b.w+20,by+wf+2); X.lineTo(bx+b.w-8,by+36); X.closePath(); X.fill();
+    X.beginPath(); X.moveTo(bx+b.w-8,by+34); X.lineTo(bx+b.w+26,by+wf+8); X.lineTo(bx+b.w+10,by+wf+26); X.lineTo(bx+b.w-8,by+54); X.closePath(); X.fill();
+    // 翼膜紋路
+    X.strokeStyle=shade(b.col,1.15); X.lineWidth=1;
+    X.beginPath(); X.moveTo(bx+8,by+18); X.lineTo(bx-38,by+wf-22); X.stroke();
+    X.beginPath(); X.moveTo(bx+b.w-8,by+18); X.lineTo(bx+b.w+38,by+wf-22); X.stroke();
+    X.lineWidth=1;
+    // 頂冠刺5根
+    X.fillStyle=flash?'#fff':shade(b.col,0.8);
+    for(let i=0;i<5;i++) X.fillRect(bx+14+i*11,by-12,4,14);
+    // 下爪
+    X.fillStyle=flash?'#fff':'#d0a0ff';
+    X.fillRect(bx-6,by+b.h-16,10,8); X.fillRect(bx-10,by+b.h-10,6,7);
+    X.fillRect(bx+b.w-4,by+b.h-16,10,8); X.fillRect(bx+b.w+4,by+b.h-10,6,7);
+  }
   else { // level 5 焦血毀滅者：巨爪+焦碳甲殼+背脊
     X.fillStyle=shade(b.col,0.7);
     X.fillRect(bx-16,by+18,20,12); X.fillRect(bx+b.w-4,by+18,20,12); // 側爪
@@ -1665,7 +1786,7 @@ function drawBoss(){
   // 大絕招蓄力 UI
   if(b.ultWind>0){
     const prog=(180-b.ultWind)/180;
-    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏'];
+    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏','翼暴咆哮'];
     // 底部蓄力紅條
     pxs(0,VH-10,VW,10,'rgba(80,0,0,0.7)');
     pxs(0,VH-10,VW*prog,10,'rgba(255,50,30,0.92)');
@@ -1751,7 +1872,7 @@ function drawHUD(){
   X.fillStyle=MELEE[player.mw].color; X.fillText('近 '+MELEE[player.mw].name+' Lv'+player.mlvl[player.mw],VW-8,24);
   X.fillStyle='#fff'; X.fillText('SCORE '+String(score).padStart(7,'0'),VW-8,36); X.textAlign='left';
   X.fillStyle='#fff'; X.font='8px "Courier New"'; X.textAlign='center';
-  X.fillText(isSpecialLevel?'特殊任務 '+THEMES[5].name:'STAGE '+(level+1)+' / 5  '+THEMES[level].name,VW/2,VH-6);
+  X.fillText(isSpecialLevel?'特殊任務 '+THEMES[5].name:isTerminalMission?'任務終端 '+THEMES[6].name:'STAGE '+(level+1)+' / 5  '+THEMES[level].name,VW/2,VH-6);
   if(isSpecialLevel&&relayTower&&relayTower.active&&!relayTower.done){
     const tw=130, tx=VW/2-tw/2;
     // 電磁塔 HP
@@ -1773,11 +1894,15 @@ function drawHUD(){
   if(msgTime>0){ X.fillStyle='rgba(255,255,255,'+Math.min(1,msgTime/30)+')'; X.font='bold 10px "Courier New"'; X.textAlign='center'; X.fillText(msgText,VW/2,66); X.textAlign='left'; }
   if(stageBanner>0){ const a=Math.min(1,stageBanner/30)*Math.min(1,(160-stageBanner)/18);
     const T=THEMES[level]; X.textAlign='center';
-    X.fillStyle='rgba(0,0,0,'+(0.55*a)+')'; X.fillRect(0,VH/2-32,VW,isSpecialLevel?58:44);
+    X.fillStyle='rgba(0,0,0,'+(0.55*a)+')'; X.fillRect(0,VH/2-32,VW,(isSpecialLevel||isTerminalMission)?58:44);
     if(isSpecialLevel){
       X.fillStyle='rgba(255,150,50,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText('⚠ 特殊任務 SPECIAL MISSION ⚠',VW/2,VH/2-14);
       X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 11px "Courier New"'; X.fillText(T.name,VW/2,VH/2+2);
       X.fillStyle='rgba(200,180,255,'+(a*0.9)+')'; X.font='8px "Courier New"'; X.fillText('長官命令：深入蟲族侵攻星球，建立電磁塔待援',VW/2,VH/2+16);
+    } else if(isTerminalMission){
+      X.fillStyle='rgba(160,80,255,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText('★ 任務終端 MISSION TERMINAL ★',VW/2,VH/2-14);
+      X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 11px "Courier New"'; X.fillText(T.name,VW/2,VH/2+2);
+      X.fillStyle='rgba(200,180,255,'+(a*0.9)+')'; X.font='8px "Courier New"'; X.fillText('長官命令：深入虛空，擊殺巢翼暴君',VW/2,VH/2+16);
     } else {
       X.fillStyle='rgba(255,210,74,'+a+')'; X.font='bold 13px "Courier New"'; X.fillText('STAGE '+(level+1),VW/2,VH/2-2);
       X.fillStyle='rgba(255,255,255,'+a+')'; X.font='bold 12px "Courier New"'; X.fillText(T.name,VW/2,VH/2+14);
@@ -1878,17 +2003,23 @@ function drawSelect(){
     X.fillStyle=L.trim;            X.font='8px "Courier New"';       X.fillText(L.hero, x+w/2, y+95);
     X.fillStyle=sel?'#cfe':'#8a9'; X.font='8px "Courier New"';       wrapCJK(L.perk, x+w/2, y+112, w-10, 11);
   }
-  // 任務選擇列
-  const m0x=VW/2-112,m1x=VW/2+4,mby=203,mbw=108,mbh=14;
-  const ms0=selMission===0, ms1=selMission===1;
+  // 任務選擇列（3選項）
+  const mbw=70,mbh=14,mby=203;
+  const m0x=VW/2-111,m1x=VW/2-35,m2x=VW/2+41;
+  const ms0=selMission===0,ms1=selMission===1,ms2=selMission===2;
+  X.textAlign='center';
   X.fillStyle=ms0?'rgba(30,60,140,.85)':'rgba(15,18,30,.6)'; X.fillRect(m0x,mby,mbw,mbh);
   X.strokeStyle=ms0?'#5ad6ff':'#334'; X.lineWidth=ms0?1.5:1; X.strokeRect(m0x+.5,mby+.5,mbw-1,mbh-1);
-  X.fillStyle=ms0?'#cef':'#556'; X.font=(ms0?'bold ':'')+'7px "Courier New"'; X.textAlign='center';
-  X.fillText('⚔ 正常戰役  (5關連闖)',m0x+mbw/2,mby+10);
+  X.fillStyle=ms0?'#cef':'#556'; X.font=(ms0?'bold ':'')+'7px "Courier New"';
+  X.fillText('⚔ 正常戰役',m0x+mbw/2,mby+10);
   X.fillStyle=ms1?'rgba(140,30,10,.85)':'rgba(15,18,30,.6)'; X.fillRect(m1x,mby,mbw,mbh);
   X.strokeStyle=ms1?'#ff7744':'#334'; X.lineWidth=ms1?1.5:1; X.strokeRect(m1x+.5,mby+.5,mbw-1,mbh-1);
   X.fillStyle=ms1?'#fca':'#556'; X.font=(ms1?'bold ':'')+'7px "Courier New"';
-  X.fillText('☠ 特殊任務  (蟲族侵攻)',m1x+mbw/2,mby+10);
+  X.fillText('☠ 蟲族侵攻',m1x+mbw/2,mby+10);
+  X.fillStyle=ms2?'rgba(80,20,140,.85)':'rgba(15,18,30,.6)'; X.fillRect(m2x,mby,mbw,mbh);
+  X.strokeStyle=ms2?'#c080ff':'#334'; X.lineWidth=ms2?1.5:1; X.strokeRect(m2x+.5,mby+.5,mbw-1,mbh-1);
+  X.fillStyle=ms2?'#e0b0ff':'#556'; X.font=(ms2?'bold ':'')+'7px "Courier New"';
+  X.fillText('★ 任務終端',m2x+mbw/2,mby+10);
   const bw=180, bx=VW/2-bw/2, by=222, bh=30, glow=Math.floor(titleT/24)%2===0;
   X.fillStyle='rgba(180,40,40,.55)'; X.fillRect(bx,by,bw,bh);
   X.strokeStyle=glow?'#ffbfae':'#ff9a8a'; X.lineWidth=1.5; X.strokeRect(bx+.5,by+.5,bw-1,bh-1);
@@ -1909,7 +2040,7 @@ function todayStr(){ const d=new Date(); return (d.getMonth()+1)+'/'+d.getDate()
 function recordScore(won){
   try{
     const list=loadScores();
-    const stLabel=won?(isSpecialLevel?'特':5):(level+1);
+    const stLabel=won?(isSpecialLevel?'特':isTerminalMission?'終':5):(level+1);
     const entry={ s:score, st:stLabel, lg:LEGIONS[selLegion].name, w:won?1:0, d:todayStr() };
     list.push(entry); list.sort((a,b)=>b.s-a.s);
     lastRank=list.indexOf(entry); lastScore=score;
@@ -2019,7 +2150,7 @@ function drawVictory(){
         X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('任務成功 — 電磁塔上線，後援趕至！',VW/2,VH/2+16);
         X.fillStyle='rgba(255,160,50,0.4)'; X.font='bold 18px "Courier New"'; X.fillText('MISSION COMPLETE',VW/2,VH/2+36);
       } else {
-        X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('巢皇已殞落 — THE EMPEROR PROTECTS',VW/2,VH/2+16);
+        X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText(isTerminalMission?'巢翼暴君已殞滅 — MISSION TERMINAL CLEAR':'巢皇已殞落 — THE EMPEROR PROTECTS',VW/2,VH/2+16);
         X.fillStyle='rgba(255,50,50,0.35)'; X.font='bold 18px "Courier New"'; X.fillText('VICTORY',VW/2,VH/2+36);
       }
       X.globalAlpha=1; }
@@ -2150,7 +2281,8 @@ function drawVictory(){
 function handleStart(){ initAudio().then(()=>{ if(state==='TITLE'||state==='GAMEOVER'||state==='VICTORY')startGame(); }); }
 function startGame(){
   isSpecialLevel=(selMission===1);
-  level=isSpecialLevel?5:0;
+  isTerminalMission=(selMission===2);
+  level=isSpecialLevel?5:isTerminalMission?6:0;
   victoryWaitingNext=false;
   score=0; player.hp=player.maxhp=100; player.shield=0; player.energy=0;
   player.rw=0; player.mw=0; player.rlvl=[1,1,1,1,1]; player.mlvl=[1,1,1]; player.blessing=0; player.inv=0;
@@ -2159,7 +2291,7 @@ function startGame(){
   player.dashCDMax=52; player.diveReady=false; player.diving=false; player.diveHits=null;
   LEGIONS[selLegion].apply(player);
   musicMode='none'; state='PLAY';
-  if(isSpecialLevel) buildSpecialLevel(); else buildLevel();
+  if(isSpecialLevel) buildSpecialLevel(); else if(isTerminalMission) buildTerminalLevel(); else buildLevel();
 }
 
 //------------------------ EXTRACT SEQUENCE -------------------------
