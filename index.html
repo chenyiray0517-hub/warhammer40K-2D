@@ -2828,7 +2828,7 @@ function updateAlliesGroup(){
     platforms.forEach(p=>{if(al.x+26>p.x+3&&al.x<p.x+p.w-3){const pb=al.y+44-(al.vy||0);if(pb<=p.y+6&&al.y+44>=p.y&&al.y+44<=p.y+20){al.y=p.y-44;al.vy=0;al.onGround=true;}}});
     let nearest=null,nearDist=9999;
     enemies.forEach(e=>{if(!e.dead){const d=Math.abs(e.x-al.x);if(d<nearDist){nearDist=d;nearest=e;}}});
-    const targetX=boss&&!bossIntro?boss.x:nearest?nearest.x:player.x+60+idx*20;
+    const targetX=boss&&!bossIntro?boss.x:nearest?nearest.x:player.x+60+idx*38;
     al.face=Math.sign(targetX-al.x)||1;
     if(nearDist<48||(boss&&!bossIntro&&Math.abs(boss.x-al.x)<64)){
       if(al.meleeCD<=0){al.meleeCD=22;al.meleeAnim=14;
@@ -2852,6 +2852,19 @@ function updateAlliesGroup(){
     if(boss&&!bossIntro&&aabb({x:al.x,y:al.y,w:26,h:44},boss)&&al.inv<=0){al.hp-=1.0;al.inv=40;}
     ebullets.forEach(b=>{if(aabb({x:b.x-3,y:b.y-3,w:6,h:6},{x:al.x,y:al.y,w:26,h:44})&&al.inv<=0){al.hp-=b.dmg*0.35;b.life=0;al.inv=30;}});
   });
+  // 盟友互相排斥，避免重疊（最小中心距 34px）
+  for(let a=0;a<allies.length;a++){
+    if(!allies[a].alive)continue;
+    for(let b=a+1;b<allies.length;b++){
+      if(!allies[b].alive)continue;
+      const dx=allies[b].x-allies[a].x;
+      if(Math.abs(dx)<34){
+        const push=(34-Math.abs(dx))*0.5+0.5;
+        allies[a].x-=Math.sign(dx||1)*push;
+        allies[b].x+=Math.sign(dx||1)*push;
+      }
+    }
+  }
 }
 function drawAlliesGroup(){
   allies.forEach((al,idx)=>{
