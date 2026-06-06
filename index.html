@@ -1336,6 +1336,7 @@ function update(){
         }
       } else if(boss.level===8){
         // 地獄獸: 混沌融合巨獸 — 瞬移+捶地+爆彈槍+充能槍
+        const tier=hpr>0.66?0:hpr>0.33?1:2;
         if(boss.teleCD===undefined){boss.teleCD=200;boss.teleWind=0;boss.slamCD=280;boss.slamTimer=0;boss.chargeWind=0;}
         const inAnim8=boss.slamTimer>0||boss.teleWind>0||boss.chargeWind>0;
         // 捶地：上升蓄力→落地衝擊波
@@ -1402,6 +1403,7 @@ function update(){
         }
       } else if(boss.level===9){
         // 裂鐵掠奪者: 工廠重甲蟲族 — 衝刺+碎片槍+熔鐵炸彈
+        const tier=hpr>0.66?0:hpr>0.33?1:2;
         if(boss.charge>0){
           boss.x+=boss.dashV;
           if(boss.x<camX+20){boss.x=camX+20;boss.dashV*=-0.5;boss.charge=0;}
