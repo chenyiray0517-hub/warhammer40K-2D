@@ -488,10 +488,11 @@ const BOSSES=[
   {name:'焦血毀滅者 BLOODCRUSHER OVERLORD',col:'#c84010',hp:24000},
   {name:'巢翼暴君 WINGED HIVE TYRANT',    col:'#6020c0',hp:18000},
   {name:'蟲族劊子手 TYRANID EXECUTIONER', col:'#900028',hp:20000},
-  {name:'地獄獸 HELLBRUTE',               col:'#9010d0',hp:22000}
+  {name:'地獄獸 HELLBRUTE',               col:'#9010d0',hp:22000},
+  {name:'裂鐵掠奪者 IRONRIFT RAVAGER',    col:'#b04010',hp:25000}
 ];
 const LV_TINT=['#1a1228','#241018','#101e12','#0e1226','#2a0810'];
-const LV_LEN=[7800,10140,11660,13410,15420,12000,9000,9000,9000];
+const LV_LEN=[7800,10140,11660,13410,15420,12000,9000,9000,9000,10800];
 
 // per-level visual theme
 const THEMES=[
@@ -512,7 +513,9 @@ const THEMES=[
   {name:'前線救援 FRONTLINE RESCUE', sky:['#000005','#04000e','#010008'], ground:'#0a0a14', groundDark:'#050510',
    horizon:'rgba(80,10,60,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'void'},
   {name:'蟲族空域 TYRANID SKY',      sky:['#020008','#0a0016','#040012'], ground:'#080818', groundDark:'#03030f',
-   horizon:'rgba(100,0,180,0.38)', atm:'spore', atmCol:'#b080ff', deco:'tyranid_sky'}
+   horizon:'rgba(100,0,180,0.38)', atm:'spore', atmCol:'#b080ff', deco:'tyranid_sky'},
+  {name:'爆破任務 DEMOLITION',        sky:['#000005','#04000e','#010008'], ground:'#0a0a14', groundDark:'#050510',
+   horizon:'rgba(80,10,60,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'mission9'}
 ];
 let atmParts=[];
 
@@ -528,6 +531,11 @@ let victoryParts=[];
 let allies=[],alliesOY=[]; // 前線救援盟友組（allies[]陣列，alliesOY[]追蹤撤離偏移）
 let frontlineAlliesSpawned=false; // 已觸發友軍加入標記
 let frontlineWaveCD=0;            // 友軍加入後持續生怪計時
+let missionBgPhase=0;             // 爆破任務背景階段 0=戶外 1=工廠 2=炸彈區
+let bombKit=null;                 // 爆破任務炸藥包物件
+let bombWaveCD=0, bombWaveCount=0;
+let explosionActive=false;        // boss 死亡後引爆爆炸
+let explosionT=0;                 // 爆炸動畫計時
 let cmdMsgText='',cmdMsgTime=0,cmdMsgIdx=0; // 長官通訊系統
 function flashCmd(t){ cmdMsgText=t; cmdMsgTime=200; sfx('G4','16n'); }
 const TERMINAL_CMD=[
@@ -544,7 +552,12 @@ const TERMINAL_CMD=[
   [{x:400,  t:'長官：前方有我方需要的重要物資！'},
    {x:2500, t:'長官：蟲族空降增援，加快速度！'},
    {x:5500, t:'長官：感應到巨型混沌訊號——地獄獸出現！'},
-   {x:7500, t:'長官：混沌寶石就在眼前！幹掉牠！'}]
+   {x:7500, t:'長官：混沌寶石就在眼前！幹掉牠！'}],
+  // mission 3: 爆破任務 (levelIdx=9)
+  [{x:400,  t:'長官：滲透工廠！在蟲族大量繁殖前設置炸藥！'},
+   {x:2500, t:'長官：蟲族密度持續上升，切勿停頓！'},
+   {x:4500, t:'長官：已進入工廠內部，繼續推進！'},
+   {x:8300, t:'長官：炸藥放置點就在眼前！防守引爆！'}]
 ];
 
 function cycleRanged(){ if(state!=='PLAY')return; player.rw=(player.rw+1)%RANGED.length; sfx('G5'); }
@@ -572,7 +585,11 @@ const TERMINAL_MISSIONS=[
   {name:'物資掠取',en:'SUPPLY RAID',
    bossName:'地獄獸 HELLBRUTE',bossCol:'#9010d0',
    desc:'混沌地獄獸守護關鍵物資',desc2:'殲滅地獄獸，奪取混沌寶石',
-   diff:'★★★★',hpMult:'1.27×',levelIdx:8}
+   diff:'★★★★',hpMult:'1.27×',levelIdx:8},
+  {name:'爆破任務',en:'DEMOLITION',
+   bossName:'裂鐵掠奪者 IRONRIFT RAVAGER',bossCol:'#b04010',
+   desc:'工廠深處隱藏大量蟲族',desc2:'設置炸藥、防守引爆，徹底清除蟲族',
+   diff:'★★★★★',hpMult:'1.33×',levelIdx:9}
 ];
 let selTerminalMission=0;
 let isSpecialLevel=false;
@@ -698,6 +715,7 @@ function buildTerminalLevel(){
   bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
   boss=null;bossIntro=0;levelTimer=0;
   allies=[];alliesOY=[];frontlineAlliesSpawned=false;frontlineWaveCD=0;cmdMsgIdx=0;cmdMsgTime=0;
+  missionBgPhase=0;bombKit=null;bombWaveCD=0;bombWaveCount=0;explosionActive=false;explosionT=0;
   player.x=60;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;
   player.hp=Math.min(player.maxhp,player.hp+25);player.inv=60;player.blessing=0;
   camX=0; buildBackground();
@@ -736,7 +754,7 @@ function buildCamp(){
   state='CAMP';
 }
 let stageBanner=0;
-const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27,1.27,1.27,1.27]; // per-stage; index 5=special, 6-8=terminal
+const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27,1.27,1.27,1.27,1.33]; // per-stage; index 5=special, 6-9=terminal
 function spawnEnemy(type,x,g){
   const b={x:x,y:0,vx:0,vy:0,type:type,hitFlash:0,t:Math.random()*6,dead:false};
   if(type==='crawler'){ Object.assign(b,{w:30,h:18,hp:61,dmg:16,spd:0.7,touch:true}); }
@@ -886,6 +904,7 @@ function defeatBoss(){ score+=2000;
     extractPlayerOY=0; extractAllyOY=0;
     enemies=[]; drops=[]; ebullets=[]; pools=[];
     if(selTerminalMission===2) flashCmd('長官：混沌寶石到手！即刻撤離！');
+    if(selTerminalMission===3){ explosionActive=true; explosionT=0; sfx('C3','1n'); setTimeout(()=>sfx('A2','2n'),400); flashCmd('長官：引爆成功！所有人立刻撤離！'); }
     flashMsg('任務完成！前往撤離點！'); sfx('C5','4n');
     if(audioReady) setMusic('menu');
     state='EXTRACT'; return;
@@ -1009,7 +1028,7 @@ function update(){
   if(keys.melee){ if(selLegion===1&&player.diveReady&&!player.onGround&&!player.diving) startDive(); else doMelee(); }
 
   // side-scroller: camera only advances right, never scrolls back
-  const _defActive=isSpecialLevel&&relayTower&&relayTower.active&&!relayTower.done;
+  const _defActive=(isSpecialLevel&&relayTower&&relayTower.active&&!relayTower.done)||(isTerminalMission&&level===9&&bombKit&&bombKit.active&&!bombKit.done);
   if(_defActive){
     // 塔防進行中：鎖定捲軸，限制玩家不超出右邊界
     if(player.x>camX+VW-16)player.x=camX+VW-16;
@@ -1019,7 +1038,7 @@ function update(){
     if(camX<0)camX=0;
   }
 
-  if(!isSpecialLevel&&!boss&&player.x>len-VW-40&&!window._bossSpawned){ spawnBoss(); window._bossSpawned=true; }
+  if(!isSpecialLevel&&!boss&&player.x>len-VW-40&&!window._bossSpawned&&!(isTerminalMission&&level===9)){ spawnBoss(); window._bossSpawned=true; }
   // 特殊任務：觸發塔防 / 塔防完成後生 boss
   if(isSpecialLevel){
     if(!relayTower && player.x>SPECIAL_DEFENSE_X){
@@ -1077,8 +1096,8 @@ function update(){
   bullets=bullets.filter(b=>b.life>0&&b.x>camX-40&&b.x<camX+VW+40);
 
   ebullets.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; if(b.grav)b.vy+=b.grav; b.life--;
-    if(b.acidBomb&&b.y+3>=GROUND){ pools.push({x:b.x,y:GROUND-4,r:28,life:300,dmg:0.65,c:'#7da010'});
-      for(let k=0;k<8;k++) particles.push({x:b.x,y:GROUND-4,vx:(Math.random()-.5)*5,vy:-Math.random()*4,life:16,c:'#9fa'}); b.life=0; return; }
+    if(b.acidBomb&&b.y+3>=GROUND){ const pc=b.poolCol||'#7da010'; pools.push({x:b.x,y:GROUND-4,r:28,life:300,dmg:0.65,c:pc});
+      for(let k=0;k<8;k++) particles.push({x:b.x,y:GROUND-4,vx:(Math.random()-.5)*5,vy:-Math.random()*4,life:16,c:b.poolCol?'#ffa040':'#9fa'}); b.life=0; return; }
     if(aabb({x:b.x-3,y:b.y-3,w:6,h:6},player)){ hurtPlayer(b.dmg); b.life=0; } });
   ebullets=ebullets.filter(b=>b.life>0&&b.y<VH+20);
 
@@ -1144,6 +1163,35 @@ function update(){
       for(let i=0;i<tbl.length;i++){acc+=wt[i];if(rr<acc){tp=tbl[i];break;}}
       spawnEnemy(tp, camX+VW+20+Math.random()*60, GROUND);
     }
+  }
+  // 爆破任務：背景階段切換 + 炸藥防守 + 引爆
+  if(isTerminalMission&&level===9){
+    if(player.x>=4500&&missionBgPhase<1){missionBgPhase=1;}
+    if(player.x>=8300&&missionBgPhase<2){missionBgPhase=2;}
+    // 炸藥放置
+    if(missionBgPhase>=2&&!bombKit&&player.x>=8500){
+      bombKit={x:player.x+140,timer:2400,active:true,done:false,hp:player.maxhp*12,maxhp:player.maxhp*12};
+      bombWaveCD=16;bombWaveCount=0;
+      flashMsg('炸藥已放置！防守40秒！');sfx('C5','4n');
+    }
+    // 防守進行中
+    if(bombKit&&bombKit.active&&!bombKit.done){
+      bombKit.timer--;
+      if(bombKit.hp<=0){bombKit.hp=0;gameOver();return;}
+      if(bombKit.timer<=0){bombKit.done=true;flashMsg('防守成功！引爆在即！');sfx('C6','4n');}
+      // 波次生怪
+      if(--bombWaveCD<=0&&bombWaveCount<180){
+        bombWaveCD=16;bombWaveCount++;
+        const tbl=['crawler','upright','infected','spitter','flyer','brute'];
+        const wt=[0.22,0.28,0.14,0.18,0.12,0.06];let rr=Math.random(),tp='upright',acc=0;
+        for(let i=0;i<tbl.length;i++){acc+=wt[i];if(rr<acc){tp=tbl[i];break;}}
+        spawnEnemy(tp,camX+VW+20+Math.random()*60,GROUND);
+      }
+      // 敵人攻擊炸藥包
+      enemies.forEach(e=>{if(!e.dead){if(e.kitCD>0)e.kitCD--;else if(Math.abs(e.x+e.w/2-bombKit.x)<42&&e.y+e.h>=GROUND-22){bombKit.hp-=e.dmg*0.28;e.kitCD=36;}}});
+    }
+    // 防守完成後 boss 登場
+    if(bombKit&&bombKit.done&&!boss&&!window._bossSpawned){spawnBoss();window._bossSpawned=true;}
   }
   // 長官通訊：依里程碑推進
   if(isTerminalMission&&!boss){const cmds=TERMINAL_CMD[selTerminalMission];if(cmds&&cmdMsgIdx<cmds.length&&player.x>=cmds[cmdMsgIdx].x){flashCmd(cmds[cmdMsgIdx].t);cmdMsgIdx++;}}
@@ -1352,6 +1400,39 @@ function update(){
             }
           }
         }
+      } else if(boss.level===9){
+        // 裂鐵掠奪者: 工廠重甲蟲族 — 衝刺+碎片槍+熔鐵炸彈
+        if(boss.charge>0){
+          boss.x+=boss.dashV;
+          if(boss.x<camX+20){boss.x=camX+20;boss.dashV*=-0.5;boss.charge=0;}
+          if(boss.x>camX+VW-boss.w-20){boss.x=camX+VW-boss.w-20;boss.dashV*=-0.5;boss.charge=0;}
+        } else {
+          const spd9=[0.95,1.45,2.1][tier];
+          const tx9=Math.max(camX+40,Math.min(camX+VW-boss.w-40,px0-boss.w/2));
+          boss.x+=Math.sign(tx9-boss.x)*spd9;
+          boss.y=boss.baseY+Math.sin(boss.t*(tier===2?4:2))*5;
+          if(boss.shootCD<=0){
+            const bdir9=Math.sign(dx||1);
+            if(tier===0){ boss.shootCD=74;
+              for(let i=-1;i<=1;i++) ebullets.push({x:boss.x+(bdir9>0?boss.w:0),y:boss.y+22+i*9,vx:bdir9*5.5,vy:i*1.1,dmg:22,life:100,c:'#c08040'});
+              sfx('E3','16n'); if(Math.random()<0.42){boss.charge=55;boss.dashV=bdir9*8;}
+            } else if(tier===1){ boss.shootCD=58;
+              if(Math.random()<0.5){
+                for(let i=-2;i<=2;i++) ebullets.push({x:boss.x+(bdir9>0?boss.w:0),y:boss.y+22,vx:bdir9*5.5,vy:i*1.1,dmg:20,life:100,c:'#c08040'});
+                sfx('E3','16n');
+              } else {
+                for(let i=0;i<2;i++) ebullets.push({x:boss.x+boss.w/2,y:boss.y+10,vx:bdir9*(1.8+i*0.6),vy:-2.6,grav:0.10,dmg:22,life:220,c:'#ff6010',acidBomb:true,poolCol:'#ff6010'});
+                sfx('D3','8n');
+              }
+              if(Math.random()<0.45){boss.charge=62;boss.dashV=bdir9*9;}
+            } else { boss.shootCD=44;
+              for(let i=-2;i<=2;i++) ebullets.push({x:boss.x+(bdir9>0?boss.w:0),y:boss.y+22,vx:bdir9*6,vy:i*1.3,dmg:24,life:100,c:'#ff8030'});
+              sfx('E2','8n');
+              if(Math.random()<0.55){boss.charge=72;boss.dashV=bdir9*11;}
+              if(Math.random()<0.35) ebullets.push({x:boss.x+boss.w/2,y:boss.y+10,vx:bdir9*2.0,vy:-2.8,grav:0.10,dmg:24,life:220,c:'#ff6010',acidBomb:true,poolCol:'#ff6010'});
+            }
+          }
+        }
       } else {
         // 吞星巢皇: MULTI-PHASE — spiral barrage + spawns + sweeping beam by hp tier
         const tx=Math.max(camX+VW-110,px0+100); boss.x+=Math.sign(tx-boss.x)*0.5;
@@ -1421,6 +1502,16 @@ function update(){
             for(let r=0;r<3;r++) for(let i=-2;i<=2;i++) ebullets.push({x:bx2,y:GROUND-3-r*6,vx:i*3.2,vy:0,grav:0,dmg:22,life:150,c:'#900028'});
             boss.charge=220; boss.dashV=Math.sign(px0-boss.x)*12||-12;
             for(let k=0;k<40;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*12,vy:(Math.random()-.5)*12,life:38,c:k%2?'#ff2040':'#900028'});
+            sfx('C1','2n');
+          } else if(boss.level===9){
+            // 裂鐵掠奪者·工廠爆裂: 4熔彈+5火池+地面衝擊波+狂衝
+            sfx('A1','4n');
+            for(let i=0;i<4;i++) ebullets.push({x:bx2,y:by2,vx:(i-1.5)*2.6,vy:-3.0,grav:0.11,dmg:28,life:240,c:'#ff6010',acidBomb:true,poolCol:'#ff6010'});
+            for(let i=0;i<5;i++) pools.push({x:camX+40+i*82,y:GROUND-4,r:32,life:420,dmg:0.7,c:'#ff6010'});
+            for(let i=-3;i<=3;i++) ebullets.push({x:bx2,y:GROUND-4,vx:i*3.2,vy:0,grav:0,dmg:24,life:140,c:'#c06020'});
+            shockwaves.push({x:bx2,y:GROUND,r:0,spd:4.5,maxR:100,a:0.6,w:3,c:'#c06020'});
+            boss.charge=110; boss.dashV=Math.sign(px0-boss.x)*9||-9;
+            for(let k=0;k<38;k++) particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*12,vy:-Math.random()*8,life:38,c:k%2?'#ff6010':'#ffd24a'});
             sfx('C1','2n');
           } else if(boss.level===8){
             // 地獄獸·混沌撕裂：瞬移中心+18向混沌彈+充能彈幕+雙層衝擊波
@@ -1626,6 +1717,66 @@ function drawDeco(T){
         X.beginPath(); X.ellipse(bxf,byf,Math.ceil(9*sc),Math.ceil(5*sc),0,0,6.28); X.fill();
         X.beginPath(); X.moveTo(bxf,byf); X.lineTo(bxf-Math.ceil(22*sc),byf-wf8); X.lineTo(bxf-Math.ceil(8*sc),byf+Math.ceil(4*sc)); X.closePath(); X.fill();
         X.beginPath(); X.moveTo(bxf,byf); X.lineTo(bxf+Math.ceil(22*sc),byf-wf8); X.lineTo(bxf+Math.ceil(8*sc),byf+Math.ceil(4*sc)); X.closePath(); X.fill();
+      }
+    }
+  } else if(T.deco==='mission9'){
+    const ph=missionBgPhase||0;
+    if(ph===1||ph===2){
+      // 工廠天花板
+      X.fillStyle='#0a0808'; X.fillRect(0,0,VW,34);
+      // 管道
+      for(let pi=0;pi<5;pi++){
+        const px=(pi*120+((pi%2?1:-1)*camX*0.04))%VW;
+        X.fillStyle='#2a1a0e'; X.fillRect(px,4,14,30);
+        X.fillStyle='#3a2010'; X.fillRect(px+2,6,3,24);
+      }
+      // 機械剪影（兩側）
+      X.fillStyle='#150c06';
+      for(let mi=0;mi<3;mi++){
+        const mx=(mi*190-camX*0.06)%VW; const my=34;
+        X.fillRect(mx,my,28,40); X.fillRect(mx+5,my+40,6,50);
+        X.fillRect(mx+18,my+40,6,38);
+      }
+      // 熔爐光暈（地板兩側）
+      for(let fi=0;fi<4;fi++){
+        const fx=(fi*150+80-camX*0.05+VW)%VW;
+        const fa=0.18+0.1*Math.sin(titleT*0.08+fi);
+        X.fillStyle='rgba(255,80,10,'+fa+')';
+        X.beginPath(); X.ellipse(fx,GROUND-2,22,10,0,0,6.28); X.fill();
+      }
+      // 金屬地板格
+      X.strokeStyle='rgba(60,40,20,0.45)'; X.lineWidth=1;
+      for(let gi=0;gi<Math.ceil(VW/20)+1;gi++){
+        const gx=(gi*20-camX*1)%VW;
+        X.beginPath(); X.moveTo(gx,GROUND-8); X.lineTo(gx,GROUND+2); X.stroke();
+      }
+      X.lineWidth=1;
+    }
+    if(ph===2){
+      // 遠方蟲群剪影（橫向緩移）
+      const sw=titleT*0.28;
+      for(let si=0;si<12;si++){
+        const sx=(si*42+sw*18)%(VW+80)-20;
+        const sy=GROUND-14+Math.sin(sw+si)*4;
+        const sz=0.35+0.25*(si%3)/2;
+        X.fillStyle='rgba(60,0,20,0.55)';
+        X.beginPath(); X.ellipse(sx,sy,Math.ceil(10*sz),Math.ceil(6*sz),0,0,6.28); X.fill();
+        X.beginPath(); X.moveTo(sx,sy); X.lineTo(sx-Math.ceil(18*sz),sy-Math.sin(sw*2.2+si)*8*sz); X.lineTo(sx-Math.ceil(6*sz),sy+Math.ceil(3*sz)); X.closePath(); X.fill();
+        X.beginPath(); X.moveTo(sx,sy); X.lineTo(sx+Math.ceil(18*sz),sy-Math.sin(sw*2.2+si)*8*sz); X.lineTo(sx+Math.ceil(6*sz),sy+Math.ceil(3*sz)); X.closePath(); X.fill();
+      }
+    }
+    if(explosionActive){
+      // 爆炸覆蓋閃光 + 殘留火焰光暈
+      const et=explosionT||0;
+      const flashA=Math.max(0,0.85-et*0.018);
+      if(flashA>0){ X.fillStyle='rgba(255,180,60,'+flashA+')'; X.fillRect(0,0,VW,VH); }
+      const glowA=Math.max(0,0.5-et*0.006)*0.7;
+      if(glowA>0){
+        for(let ei=0;ei<5;ei++){
+          const ex=60+ei*90+Math.sin(et*0.04+ei)*12;
+          X.fillStyle='rgba(255,60,10,'+glowA+')';
+          X.beginPath(); X.arc(ex,GROUND-5,28+ei*8,0,6.28); X.fill();
+        }
       }
     }
   } else if(T.deco==='void'){
@@ -1939,8 +2090,10 @@ function drawEnemy(e){
 
 function drawPools(){
   pools.forEach(po=>{ const sx=po.x-camX, a=Math.min(0.5,po.life/120)*0.5;
-    X.fillStyle='rgba(120,220,80,'+a+')'; X.beginPath(); X.ellipse(sx,po.y,po.r,5,0,0,6.28); X.fill();
-    X.fillStyle='rgba(180,255,100,'+(a*0.6)+')'; for(let i=0;i<4;i++){ const bx=sx-po.r+i*(po.r/2)+Math.sin(titleT/10+i)*3; X.fillRect(bx,po.y-3-Math.abs(Math.sin(titleT/8+i))*4,2,4); } });
+    const fire=po.c&&po.c!=='#7da010';
+    X.fillStyle=fire?`rgba(255,90,10,${a})`:`rgba(120,220,80,${a})`; X.beginPath(); X.ellipse(sx,po.y,po.r,5,0,0,6.28); X.fill();
+    X.fillStyle=fire?`rgba(255,160,40,${a*0.6})`:`rgba(180,255,100,${a*0.6})`;
+    for(let i=0;i<4;i++){ const bx=sx-po.r+i*(po.r/2)+Math.sin(titleT/10+i)*3; X.fillRect(bx,po.y-3-Math.abs(Math.sin(titleT/8+i))*4,2,4); } });
 }
 function drawBoss(){
   if(!boss)return; const b=boss; const tele=b.tele>0&&Math.floor(b.tele/3)%2===0; const flash=b.hitFlash>0||tele; const c=flash?'#fff':b.col, bx=b.x-camX, by=b.y;
@@ -2013,6 +2166,24 @@ function drawBoss(){
       X.strokeStyle='rgba(144,0,40,'+rp+')'; X.lineWidth=3;
       X.beginPath(); X.arc(bx+b.w/2,by+b.h,b.w*0.9,Math.PI,0); X.stroke(); X.lineWidth=1;
     }
+  } else if(b.level===9){ // 裂鐵掠奪者：工廠重甲蟲族，衝擊鉗臂+熔爐胸甲
+    X.fillStyle=flash?'#fff':'#6a3018'; X.fillRect(bx+8,by+8,b.w-16,7); // 額甲
+    X.fillStyle=flash?'#fff':'#9a4828'; for(let i=0;i<3;i++) X.fillRect(bx+22+i*13,by-8,5,11); // 頭頂尖刺
+    X.fillStyle=flash?'#fff':'#7a3820'; X.fillRect(bx+8,by+20,b.w-16,8); // 胸甲橫條
+    X.fillStyle=flash?'#eee':'#c0a080'; for(let ri=0;ri<5;ri++) X.fillRect(bx+12+ri*12,by+22,3,4); // 鉚釘
+    X.fillStyle=flash?'#fff':shade(b.col,0.7);
+    X.fillRect(bx-15,by+18,20,14); X.fillRect(bx+b.w-5,by+18,20,14); // 鉗臂
+    X.fillStyle=flash?'#eee':'#aaa';
+    X.fillRect(bx-19,by+16,6,7); X.fillRect(bx-22,by+21,5,5); // 左鉗尖
+    X.fillRect(bx+b.w+13,by+16,6,7); X.fillRect(bx+b.w+17,by+21,5,5); // 右鉗尖
+    // 激怒熔爐光效
+    if(b.hp/b.maxhp<0.4){
+      const rp9=0.3+0.4*Math.abs(Math.sin(b.t*3.5));
+      X.fillStyle='rgba(255,80,10,'+rp9+')';
+      for(let ri=0;ri<3;ri++){X.beginPath();X.arc(bx+20+ri*22,by+b.h-9,7,0,6.28);X.fill();}
+      X.strokeStyle='rgba(255,120,20,'+(rp9*0.7)+')'; X.lineWidth=2;
+      X.beginPath(); X.arc(bx+b.w/2,by+b.h/2,b.w*0.85,0,6.28); X.stroke(); X.lineWidth=1;
+    }
   } else if(b.level===8){ // 地獄獸：混沌融合重甲巨獸+砲管臂
     const dm=flash?'#fff':'#2a1a3a', mm=flash?'#fff':'#4a2a6a', cp=flash?'#fff':'#6010a0';
     const charging=b.chargeWind>0;
@@ -2075,7 +2246,7 @@ function drawBoss(){
   // 大絕招蓄力 UI
   if(b.ultWind>0){
     const prog=(180-b.ultWind)/180;
-    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏','翼暴咆哮','執刑之刃','混沌撕裂'];
+    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏','翼暴咆哮','執刑之刃','混沌撕裂','工廠爆裂'];
     // 底部蓄力紅條
     pxs(0,VH-10,VW,10,'rgba(80,0,0,0.7)');
     pxs(0,VH-10,VW*prog,10,'rgba(255,50,30,0.92)');
@@ -2534,7 +2705,7 @@ function drawVictory(){
         X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('任務成功 — 電磁塔上線，後援趕至！',VW/2,VH/2+16);
         X.fillStyle='rgba(255,160,50,0.4)'; X.font='bold 18px "Courier New"'; X.fillText('MISSION COMPLETE',VW/2,VH/2+36);
       } else {
-        const vText=isTerminalMission?(['巢翼暴君已殞滅 — VOID HUNT CLEAR','蟲族劊子手已殞滅 — FRONTLINE CLEAR','地獄獸已殞滅 — SUPPLY RAID CLEAR'][selTerminalMission]||'任務終端清除'):'巢皇已殞落 — THE EMPEROR PROTECTS';
+        const vText=isTerminalMission?(['巢翼暴君已殞滅 — VOID HUNT CLEAR','蟲族劊子手已殞滅 — FRONTLINE CLEAR','地獄獸已殞滅 — SUPPLY RAID CLEAR','裂鐵掠奪者已殞滅 — DEMOLITION CLEAR'][selTerminalMission]||'任務終端清除'):'巢皇已殞落 — THE EMPEROR PROTECTS';
         X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText(vText,VW/2,VH/2+16);
         X.fillStyle='rgba(255,50,50,0.35)'; X.font='bold 18px "Courier New"'; X.fillText('VICTORY',VW/2,VH/2+36);
       }
@@ -2683,6 +2854,7 @@ function startGame(){
 //------------------------ EXTRACT SEQUENCE -------------------------
 function updateExtract(){
   extractTimer++; if(msgTime>0)msgTime--; if(cmdMsgTime>0)cmdMsgTime--;
+  if(explosionActive)explosionT++;
   if(player.inv>0)player.inv--;
   if(ally&&ally.alive&&ally.inv>0)ally.inv--;
   allies.forEach(al=>{ if(al.alive&&al.inv>0)al.inv--; });
@@ -3066,6 +3238,32 @@ function drawTower(){
   }
 }
 
+function drawBombKit(){
+  if(!bombKit||!bombKit.active)return;
+  const bkx=bombKit.x-camX, bky=GROUND;
+  // 炸藥箱體
+  X.fillStyle='#3a2808'; X.fillRect(bkx-16,bky-22,32,22);
+  X.fillStyle='#5a3c10'; X.fillRect(bkx-14,bky-20,28,18);
+  X.strokeStyle='#c07820'; X.lineWidth=1;
+  X.strokeRect(bkx-14,bky-20,28,18);
+  // 危險警示條
+  for(let si=0;si<4;si++){ X.fillStyle=si%2?'#f0a000':'#2a1800'; X.fillRect(bkx-14+si*7,bky-20,7,4); }
+  // 電線
+  X.strokeStyle='#ff4020'; X.lineWidth=1.2;
+  X.beginPath(); X.moveTo(bkx,bky-22); X.lineTo(bkx,bky-28); X.lineTo(bkx+8,bky-28); X.stroke();
+  // 計時器LED
+  const ledA=0.5+0.5*Math.sin(levelTimer*0.22);
+  X.fillStyle='rgba(255,60,20,'+ledA+')'; X.beginPath(); X.arc(bkx+5,bky-13,3,0,6.28); X.fill();
+  if(!bombKit.done){
+    // HP條
+    const bw=48; const hx=bkx-24, hy=bky-34;
+    pxs(hx,hy,bw,4,'#400'); pxs(hx,hy,bw*(bombKit.hp/bombKit.maxhp),4,'#f04020');
+    X.fillStyle='#f04020'; X.font='5px "Courier New"'; X.textAlign='center'; X.fillText('炸藥',bkx,hy-2); X.textAlign='left';
+    // 倒計時
+    const secs=Math.ceil(bombKit.timer/60);
+    X.fillStyle=secs<=10?'#ff4040':'#ffd24a'; X.font='bold 8px "Courier New"'; X.textAlign='center'; X.fillText(secs+'s',bkx,bky-38); X.textAlign='left';
+  }
+}
 function drawSpecialSwarm(){
   bgSpecialSwarm.forEach(f=>{
     f.t+=0.04; f.x-=f.spd*0.28; if(f.x<-20)f.x=VW+22;
@@ -3506,7 +3704,7 @@ function loop(){
   else if(state==='LEADERBOARD'){ drawLeaderboardScreen(); }
   else if(state==='CAMP'){ drawCamp(); if(paused)drawPauseOverlay(); }
   else if(state==='EXTRACT'){ drawBackground(); drawPlatforms(); drawParticles(); drawShockwaves(); drawExtractionZone(); drawShip(); drawAlly(); drawAlliesGroup(); drawDashTrail(); drawMarine(); drawExtractHUD(); if(paused)drawPauseOverlay(); }
-  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); if(isSpecialLevel)drawTower(); if(isSpecialLevel)drawAlly(); if(isTerminalMission&&allies.length>0)drawAlliesGroup(); drawDashTrail(); drawMarine(); drawParticles(); drawShockwaves(); drawHUD();
+  else { drawBackground(); drawPlatforms(); drawPools(); drawDrops(); enemies.forEach(drawEnemy); drawBoss(); drawBullets(); if(isSpecialLevel)drawTower(); if(isTerminalMission&&level===9)drawBombKit(); if(isSpecialLevel)drawAlly(); if(isTerminalMission&&allies.length>0)drawAlliesGroup(); drawDashTrail(); drawMarine(); drawParticles(); drawShockwaves(); drawHUD();
     if(paused&&playing)drawPauseOverlay();
     if(state==='GAMEOVER')drawGameOver(); if(state==='VICTORY')drawVictory(); }
   requestAnimationFrame(loop);
