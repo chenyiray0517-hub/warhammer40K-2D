@@ -524,6 +524,7 @@ let bgStars=[],bgBuildings=[],bgFarFight=[],satellites=[],bgSpecialSwarm=[];
 let victoryParts=[];
 let allies=[],alliesOY=[]; // 前線救援盟友組（allies[]陣列，alliesOY[]追蹤撤離偏移）
 let frontlineAlliesSpawned=false; // 已觸發友軍加入標記
+let frontlineWaveCD=0;            // 友軍加入後持續生怪計時
 let cmdMsgText='',cmdMsgTime=0,cmdMsgIdx=0; // 長官通訊系統
 function flashCmd(t){ cmdMsgText=t; cmdMsgTime=200; sfx('G4','16n'); }
 const TERMINAL_CMD=[
@@ -684,7 +685,7 @@ function buildSpecialLevel(){
 function buildTerminalLevel(){
   bullets=[];ebullets=[];enemies=[];drops=[];particles=[];platforms=[];pools=[];shockwaves=[];
   boss=null;bossIntro=0;levelTimer=0;
-  allies=[];alliesOY=[];frontlineAlliesSpawned=false;cmdMsgIdx=0;cmdMsgTime=0;
+  allies=[];alliesOY=[];frontlineAlliesSpawned=false;frontlineWaveCD=0;cmdMsgIdx=0;cmdMsgTime=0;
   player.x=60;player.y=GROUND-player.h;player.vx=0;player.vy=0;player.onGround=true;
   player.hp=Math.min(player.maxhp,player.hp+25);player.inv=60;player.blessing=0;
   camX=0; buildBackground();
@@ -858,8 +859,15 @@ function defeatBoss(){ score+=2000;
     state='EXTRACT'; return;
   }
   if(isTerminalMission){
-    // 復活陣亡盟友以便撤離
-    allies.forEach((al,i)=>{ if(!al.alive){al.alive=true;al.hp=1;al.inv=60;al.x=Math.max(player.x-55-i*36,player.x-160);al.y=GROUND-44;} });
+    // 前線救援：必須起碼存活一位盟友才算成功
+    if(selTerminalMission===1&&allies.length>0&&!allies.some(al=>al.alive)){
+      flashMsg('友軍全滅！任務失敗！'); sfx('A2','8n');
+      setTimeout(gameOver, 1200); return;
+    }
+    // 虛空獵殺無盟友組，直接跳撤離；前線救援只帶存活盟友（不復活陣亡者）
+    if(selTerminalMission!==1){
+      allies.forEach((al,i)=>{ if(!al.alive){al.alive=true;al.hp=1;al.inv=60;al.x=Math.max(player.x-55-i*36,player.x-160);al.y=GROUND-44;} });
+    }
     alliesOY=allies.map(()=>0);
     extractPhase=0; extractTimer=0;
     extractZoneX=_bx+_bw+320;
@@ -1114,6 +1122,16 @@ function update(){
   if(isTerminalMission&&allies.length>0) updateAlliesGroup();
   // 前線救援：抵達中點時觸發友軍加入
   if(isTerminalMission&&level===7&&!frontlineAlliesSpawned&&player.x>=4200) spawnFrontlineAllies();
+  // 前線救援：友軍加入後持續生怪（從鏡頭右側湧入）
+  if(isTerminalMission&&level===7&&frontlineAlliesSpawned&&!boss){
+    if(--frontlineWaveCD<=0){
+      frontlineWaveCD=20;
+      const tbl=['crawler','upright','infected','spitter','flyer','brute'];
+      const wt=[0.22,0.28,0.14,0.18,0.12,0.06]; let rr=Math.random(),tp='upright',acc=0;
+      for(let i=0;i<tbl.length;i++){acc+=wt[i];if(rr<acc){tp=tbl[i];break;}}
+      spawnEnemy(tp, camX+VW+20+Math.random()*60, GROUND);
+    }
+  }
   // 長官通訊：依里程碑推進
   if(isTerminalMission&&!boss){const cmds=TERMINAL_CMD[selTerminalMission];if(cmds&&cmdMsgIdx<cmds.length&&player.x>=cmds[cmdMsgIdx].x){flashCmd(cmds[cmdMsgIdx].t);cmdMsgIdx++;}}
   if(cmdMsgTime>0)cmdMsgTime--;
