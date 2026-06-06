@@ -487,10 +487,11 @@ const BOSSES=[
   {name:'吞星巢皇 STARSUNDER HIVE-TYRANT',col:'#d44',hp:44000},
   {name:'焦血毀滅者 BLOODCRUSHER OVERLORD',col:'#c84010',hp:24000},
   {name:'巢翼暴君 WINGED HIVE TYRANT',    col:'#6020c0',hp:18000},
-  {name:'蟲族劊子手 TYRANID EXECUTIONER', col:'#900028',hp:20000}
+  {name:'蟲族劊子手 TYRANID EXECUTIONER', col:'#900028',hp:20000},
+  {name:'地獄獸 HELLBRUTE',               col:'#9010d0',hp:22000}
 ];
 const LV_TINT=['#1a1228','#241018','#101e12','#0e1226','#2a0810'];
-const LV_LEN=[7800,10140,11660,13410,15420,12000,9000,9000];
+const LV_LEN=[7800,10140,11660,13410,15420,12000,9000,9000,9000];
 
 // per-level visual theme
 const THEMES=[
@@ -509,7 +510,9 @@ const THEMES=[
   {name:'虛空獵殺 VOID HUNT', sky:['#000005','#04000e','#000208'], ground:'#0c0814', groundDark:'#060410',
    horizon:'rgba(60,20,140,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'void'},
   {name:'前線救援 FRONTLINE RESCUE', sky:['#000005','#04000e','#010008'], ground:'#0a0a14', groundDark:'#050510',
-   horizon:'rgba(80,10,60,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'void'}
+   horizon:'rgba(80,10,60,0.28)', atm:'ash', atmCol:'#c0a0ff', deco:'void'},
+  {name:'蟲族空域 TYRANID SKY',      sky:['#020008','#0a0016','#040012'], ground:'#080818', groundDark:'#03030f',
+   horizon:'rgba(100,0,180,0.38)', atm:'spore', atmCol:'#b080ff', deco:'tyranid_sky'}
 ];
 let atmParts=[];
 
@@ -536,7 +539,12 @@ const TERMINAL_CMD=[
   [{x:400,  t:'長官：前線基地告急！即刻支援友軍！'},
    {x:2500, t:'長官：蟲族密度激增，突破重圍！'},
    {x:4000, t:'長官：友軍位置就在前方！'},
-   {x:7000, t:'長官：巨型蟲族逼近！全員備戰！'}]
+   {x:7000, t:'長官：巨型蟲族逼近！全員備戰！'}],
+  // mission 2: 物資掠取 (levelIdx=8)
+  [{x:400,  t:'長官：前方有我方需要的重要物資！'},
+   {x:2500, t:'長官：蟲族空降增援，加快速度！'},
+   {x:5500, t:'長官：感應到巨型混沌訊號——地獄獸出現！'},
+   {x:7500, t:'長官：混沌寶石就在眼前！幹掉牠！'}]
 ];
 
 function cycleRanged(){ if(state!=='PLAY')return; player.rw=(player.rw+1)%RANGED.length; sfx('G5'); }
@@ -560,7 +568,11 @@ const TERMINAL_MISSIONS=[
   {name:'前線救援',en:'FRONTLINE RESCUE',
    bossName:'蟲族劊子手 TYRANID EXECUTIONER',bossCol:'#900028',
    desc:'前線友軍基地告急 — 即刻馳援',desc2:'清除蟲族威脅，攜友軍安全撤離',
-   diff:'★★★★',hpMult:'1.27×',levelIdx:7}
+   diff:'★★★★',hpMult:'1.27×',levelIdx:7},
+  {name:'物資掠取',en:'SUPPLY RAID',
+   bossName:'地獄獸 HELLBRUTE',bossCol:'#9010d0',
+   desc:'混沌地獄獸守護關鍵物資',desc2:'殲滅地獄獸，奪取混沌寶石',
+   diff:'★★★★',hpMult:'1.27×',levelIdx:8}
 ];
 let selTerminalMission=0;
 let isSpecialLevel=false;
@@ -724,7 +736,7 @@ function buildCamp(){
   state='CAMP';
 }
 let stageBanner=0;
-const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27,1.27,1.27]; // per-stage; index 5=special, 6-7=terminal
+const ENEMY_HP_MULT=[1.00,1.10,1.21,1.27,1.33,1.27,1.27,1.27,1.27]; // per-stage; index 5=special, 6-8=terminal
 function spawnEnemy(type,x,g){
   const b={x:x,y:0,vx:0,vy:0,type:type,hitFlash:0,t:Math.random()*6,dead:false};
   if(type==='crawler'){ Object.assign(b,{w:30,h:18,hp:61,dmg:16,spd:0.7,touch:true}); }
@@ -741,7 +753,7 @@ function spawnEnemy(type,x,g){
 }
 function spawnBoss(){
   const b=BOSSES[level];
-  const flyY=level===6?GROUND-130:level===7?GROUND-80:GROUND-100;
+  const flyY=level===6?GROUND-130:(level===7||level===8)?GROUND-80:GROUND-100;
   boss={x:camX+VW-100,y:flyY,w:80,h:80,hp:b.hp,maxhp:b.hp,name:b.name,col:b.col,
         t:0,phase:0,shootCD:60,hitFlash:0,baseY:flyY,level:level,tele:0,charge:0,dashV:0,
         ultCD:480,ultWind:0};
@@ -873,6 +885,7 @@ function defeatBoss(){ score+=2000;
     extractZoneX=_bx+_bw+320;
     extractPlayerOY=0; extractAllyOY=0;
     enemies=[]; drops=[]; ebullets=[]; pools=[];
+    if(selTerminalMission===2) flashCmd('長官：混沌寶石到手！即刻撤離！');
     flashMsg('任務完成！前往撤離點！'); sfx('C5','4n');
     if(audioReady) setMusic('menu');
     state='EXTRACT'; return;
@@ -1273,6 +1286,72 @@ function update(){
             }
           }
         }
+      } else if(boss.level===8){
+        // 地獄獸: 混沌融合巨獸 — 瞬移+捶地+爆彈槍+充能槍
+        if(boss.teleCD===undefined){boss.teleCD=200;boss.teleWind=0;boss.slamCD=280;boss.slamTimer=0;boss.chargeWind=0;}
+        const inAnim8=boss.slamTimer>0||boss.teleWind>0||boss.chargeWind>0;
+        // 捶地：上升蓄力→落地衝擊波
+        if(boss.slamTimer>0){
+          boss.slamTimer--;
+          boss.y=boss.baseY-boss.slamTimer*1.6;
+          if(boss.slamTimer===0){
+            boss.y=boss.baseY;
+            const bxs=boss.x+boss.w/2;
+            for(let i=-3;i<=3;i++) ebullets.push({x:bxs,y:GROUND-4,vx:i*3.8,vy:0,grav:0,dmg:28,life:140,c:'#9010d0'});
+            shockwaves.push({x:bxs,y:GROUND,r:0,spd:4.5,maxR:100,a:0.6,w:3,c:'#9010d0'});
+            sfx('E2','4n');
+            for(let k=0;k<20;k++) particles.push({x:bxs+((Math.random()-.5)*44),y:GROUND,vx:(Math.random()-.5)*8,vy:-Math.random()*6,life:22,c:'#9010d0'});
+          }
+        }
+        // 瞬移：蓄力閃爍→瞬間移位→到達爆裂
+        if(boss.teleWind>0){
+          boss.teleWind--;
+          if(boss.teleWind===0){
+            const side=Math.random()<0.5?-110:110;
+            boss.x=Math.max(camX+30,Math.min(camX+VW-boss.w-30,px0+side));
+            boss.y=boss.baseY; boss.tele=24;
+            for(let i=0;i<14;i++){const a8=(i/14)*6.28;ebullets.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:Math.cos(a8)*3.5,vy:Math.sin(a8)*3.5,dmg:20,life:90,c:'#c040ff'});}
+            for(let k=0;k<24;k++) particles.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*10,life:28,c:k%2?'#9010d0':'#e080ff'});
+            sfx('A3','8n');
+          }
+        }
+        // 充能步槍：蓄力110幀→發射5道藍色高速彈
+        if(boss.chargeWind>0){
+          boss.chargeWind++;
+          if(boss.chargeWind>=110){
+            boss.chargeWind=0;
+            const bdir8=Math.sign(px0-boss.x)||1;
+            for(let i=-2;i<=2;i++) ebullets.push({x:boss.x+(bdir8>0?boss.w:0),y:boss.y+22+i*14,vx:bdir8*7.5,vy:0,dmg:24,life:90,c:'#a0e4ff'});
+            sfx('A5','4n');
+            for(let k=0;k<16;k++) particles.push({x:boss.x+boss.w/2,y:boss.y+boss.h/2,vx:(bdir8*3+(Math.random()-.5)*2),vy:(Math.random()-.5)*3,life:18,c:'#a0e4ff'});
+            boss.shootCD=80;
+          }
+        }
+        if(!inAnim8){
+          const spd8=[0.85,1.28,1.9][tier];
+          const tx8=Math.max(camX+40,Math.min(camX+VW-boss.w-40,px0-boss.w/2));
+          boss.x+=Math.sign(tx8-boss.x)*spd8;
+          boss.y=boss.baseY+Math.sin(boss.t*2.5)*(tier===2?3:7);
+          if(--boss.teleCD<=0){boss.teleCD=[380,280,190][tier];boss.teleWind=[52,40,28][tier];}
+          if(tier>0&&--boss.slamCD<=0){boss.slamCD=[220,160][tier-1];boss.slamTimer=[52,42][tier-1];}
+          if(boss.shootCD<=0){
+            const bdir8=Math.sign(dx||1);
+            if(tier===0){boss.shootCD=78;
+              for(let i=-1;i<=1;i++) ebullets.push({x:boss.x+(bdir8>0?boss.w:0),y:boss.y+22+i*8,vx:bdir8*5.5,vy:i*0.9,dmg:20,life:100,c:'#e0d0a0'});
+              sfx('E4','16n');
+            } else if(tier===1){
+              if(Math.random()<0.52){boss.shootCD=62;
+                for(let i=-2;i<=2;i++) ebullets.push({x:boss.x+(bdir8>0?boss.w:0),y:boss.y+22,vx:bdir8*5.5,vy:i*1.0,dmg:20,life:100,c:'#e0d0a0'});
+                sfx('E4','16n');
+              } else {boss.shootCD=140;boss.chargeWind=1;sfx('B4','16n');}
+            } else {
+              if(Math.random()<0.4){boss.shootCD=48;
+                for(let i=-2;i<=2;i++) ebullets.push({x:boss.x+(bdir8>0?boss.w:0),y:boss.y+22,vx:bdir8*6.0,vy:i*1.2,dmg:22,life:100,c:'#e0d0a0'});
+                sfx('E4','16n');
+              } else {boss.shootCD=120;boss.chargeWind=1;sfx('B4','16n');}
+            }
+          }
+        }
       } else {
         // 吞星巢皇: MULTI-PHASE — spiral barrage + spawns + sweeping beam by hp tier
         const tx=Math.max(camX+VW-110,px0+100); boss.x+=Math.sign(tx-boss.x)*0.5;
@@ -1343,6 +1422,17 @@ function update(){
             boss.charge=220; boss.dashV=Math.sign(px0-boss.x)*12||-12;
             for(let k=0;k<40;k++)particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*12,vy:(Math.random()-.5)*12,life:38,c:k%2?'#ff2040':'#900028'});
             sfx('C1','2n');
+          } else if(boss.level===8){
+            // 地獄獸·混沌撕裂：瞬移中心+18向混沌彈+充能彈幕+雙層衝擊波
+            sfx('A1','4n');
+            boss.x=Math.max(camX+40,Math.min(camX+VW-boss.w-40,camX+VW/2-boss.w/2));
+            boss.y=boss.baseY; boss.tele=30;
+            for(let i=0;i<18;i++){const a=(i/18)*6.28;ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*5,vy:Math.sin(a)*5,dmg:25,life:160,c:'#c040ff'});}
+            for(let r=0;r<3;r++) for(let i=-2;i<=2;i++) ebullets.push({x:bx2,y:GROUND-3-r*7,vx:i*3.5,vy:0,grav:0,dmg:22,life:150,c:'#9010d0'});
+            shockwaves.push({x:boss.x+boss.w/2,y:GROUND,r:0,spd:5.5,maxR:120,a:0.7,w:3,c:'#9010d0'});
+            shockwaves.push({x:boss.x+boss.w/2,y:GROUND,r:0,spd:3.5,maxR:90, a:0.5,w:2,c:'#c040ff'});
+            for(let k=0;k<40;k++) particles.push({x:bx2,y:by2,vx:(Math.random()-.5)*14,vy:(Math.random()-.5)*14,life:40,c:k%2?'#9010d0':'#e080ff'});
+            sfx('B1','2n');
           } else {
             // 吞星巢皇·末日星爆：三環彈幕(12+14+16) + 召喚重甲獸+2直立者
             for(let ring=0;ring<3;ring++){const n=[12,14,16][ring],spd=2.4+ring*0.9;for(let i=0;i<n;i++){const a=(i/n)*6.28+(ring*0.42);ebullets.push({x:bx2,y:by2,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,dmg:22,life:230,c:ring===2?'#fb4':'#f66'});}}
@@ -1522,6 +1612,22 @@ function drawDeco(T){
       X.fillStyle='#2a0a14'; X.beginPath(); X.moveTo(bx,GROUND); X.lineTo(bx+b.w*0.5,topY-Math.sin(titleT/25+b.x)*4); X.lineTo(bx+b.w,GROUND); X.closePath(); X.fill();
       X.fillStyle='rgba(255,50,80,'+(0.2+0.15*Math.sin(titleT/18+b.x))+')'; X.beginPath(); X.arc(bx+b.w*0.5,GROUND-b.h*0.35,5,0,6.28); X.fill();
       X.fillStyle='#d8c0b0'; X.fillRect(bx+b.w*0.5-1,topY,2,b.h*0.3); });
+  } else if(T.deco==='tyranid_sky'){
+    // 3層視差蟲族飛行生物
+    for(let layer=0;layer<3;layer++){
+      const spacing=260-layer*55, sc=1-layer*0.28;
+      X.fillStyle='rgba('+(layer===0?'130,15,200':'85,5,150')+',' +(0.52-layer*0.12)+')';
+      for(let fi=0;fi<9;fi++){
+        const ox=fi*spacing+layer*88;
+        const bxf=((ox-camX*(0.025+layer*0.018))%(spacing*9+9)+spacing*9+9)%(spacing*9+9)-spacing;
+        if(bxf<-55||bxf>VW+55)continue;
+        const byf=11+layer*19+(bgBuildings[Math.min(fi*3+layer,bgBuildings.length-1)]?.seed||0.5)*22;
+        const wf8=Math.sin(titleT*0.13+fi+layer)*13*sc;
+        X.beginPath(); X.ellipse(bxf,byf,Math.ceil(9*sc),Math.ceil(5*sc),0,0,6.28); X.fill();
+        X.beginPath(); X.moveTo(bxf,byf); X.lineTo(bxf-Math.ceil(22*sc),byf-wf8); X.lineTo(bxf-Math.ceil(8*sc),byf+Math.ceil(4*sc)); X.closePath(); X.fill();
+        X.beginPath(); X.moveTo(bxf,byf); X.lineTo(bxf+Math.ceil(22*sc),byf-wf8); X.lineTo(bxf+Math.ceil(8*sc),byf+Math.ceil(4*sc)); X.closePath(); X.fill();
+      }
+    }
   } else if(T.deco==='void'){
     // 帝國軍艦剪影 + 蟲族生物艦 + 遠方爆炸閃光
     for(let i=0;i<3;i++){
@@ -1838,14 +1944,18 @@ function drawPools(){
 }
 function drawBoss(){
   if(!boss)return; const b=boss; const tele=b.tele>0&&Math.floor(b.tele/3)%2===0; const flash=b.hitFlash>0||tele; const c=flash?'#fff':b.col, bx=b.x-camX, by=b.y;
-  // teleport fade (stalker)
+  // teleport fade
   if(b.level===3&&b.tele>0){ X.globalAlpha=0.3; }
-  X.fillStyle=c; X.fillRect(bx+10,by+14,b.w-20,b.h-20);
-  X.fillStyle=flash?'#fff':shade(b.col,1.3); X.fillRect(bx+10,by+14,b.w-20,6);
-  X.fillStyle=c; X.fillRect(bx+20,by,b.w-40,18);
-  X.fillStyle='#1a0008'; X.fillRect(bx+24,by+7,b.w-48,7);
-  X.fillStyle='#eee'; for(let i=0;i<7;i++)X.fillRect(bx+24+i*5,by+7,2,4);
-  X.fillStyle='#ff3'; X.fillRect(bx+22,by+2,5,5); X.fillRect(bx+b.w-27,by+2,5,5);
+  // 地獄獸瞬移蓄力閃爍
+  if(b.level===8&&b.teleWind>0){ X.globalAlpha=Math.floor(b.teleWind/4)%2===0?0.1:0.88; }
+  if(b.level!==8){
+    X.fillStyle=c; X.fillRect(bx+10,by+14,b.w-20,b.h-20);
+    X.fillStyle=flash?'#fff':shade(b.col,1.3); X.fillRect(bx+10,by+14,b.w-20,6);
+    X.fillStyle=c; X.fillRect(bx+20,by,b.w-40,18);
+    X.fillStyle='#1a0008'; X.fillRect(bx+24,by+7,b.w-48,7);
+    X.fillStyle='#eee'; for(let i=0;i<7;i++)X.fillRect(bx+24+i*5,by+7,2,4);
+    X.fillStyle='#ff3'; X.fillRect(bx+22,by+2,5,5); X.fillRect(bx+b.w-27,by+2,5,5);
+  }
   X.fillStyle=shade(b.col,0.7);
   if(b.level===0){ for(let i=0;i<5;i++){ X.beginPath(); X.arc(bx+14+i*13,by+b.h-6,6,0,6.28); X.fill(); } }
   else if(b.level===1){ X.fillRect(bx-10,by+22,15,10); X.fillRect(bx+b.w-5,by+22,15,10); X.fillStyle='#ddd'; X.fillRect(bx-13,by+20,5,5); X.fillRect(bx+b.w+8,by+20,5,5); }
@@ -1903,6 +2013,51 @@ function drawBoss(){
       X.strokeStyle='rgba(144,0,40,'+rp+')'; X.lineWidth=3;
       X.beginPath(); X.arc(bx+b.w/2,by+b.h,b.w*0.9,Math.PI,0); X.stroke(); X.lineWidth=1;
     }
+  } else if(b.level===8){ // 地獄獸：混沌融合重甲巨獸+砲管臂
+    const dm=flash?'#fff':'#2a1a3a', mm=flash?'#fff':'#4a2a6a', cp=flash?'#fff':'#6010a0';
+    const charging=b.chargeWind>0;
+    // 腿部裝甲
+    X.fillStyle=dm; X.fillRect(bx+12,by+b.h-24,20,24); X.fillRect(bx+b.w-32,by+b.h-24,20,24);
+    X.fillStyle=cp; X.fillRect(bx+12,by+b.h-24,20,4); X.fillRect(bx+b.w-32,by+b.h-24,20,4);
+    // 主裝甲軀幹
+    X.fillStyle=dm; X.fillRect(bx+6,by+18,b.w-12,b.h-38);
+    X.fillStyle=mm; X.fillRect(bx+6,by+18,b.w-12,5);
+    X.fillStyle=dm; X.fillRect(bx+6,by+b.h-42,b.w-12,4);
+    // 胸甲混沌八角星紋
+    X.fillStyle=flash?'#fff':shade(b.col,1.5);
+    X.fillRect(bx+b.w/2-3,by+26,6,20); X.fillRect(bx+b.w/2-11,by+33,22,6);
+    for(let si=0;si<4;si++){const sa=si*Math.PI/2+Math.PI/4;X.fillRect(bx+b.w/2-1+Math.cos(sa)*10,by+36+Math.sin(sa)*7,4,4);}
+    // 頭部
+    X.fillStyle=dm; X.fillRect(bx+18,by+4,b.w-36,18);
+    X.fillStyle=mm; X.fillRect(bx+18,by+4,b.w-36,4);
+    // 混沌犄角（左右各一，前後彎曲）
+    X.fillStyle=flash?'#fff':'#c060e0';
+    X.fillRect(bx+20,by-4,5,12); X.fillRect(bx+17,by-10,4,8);
+    X.fillRect(bx+b.w-25,by-4,5,12); X.fillRect(bx+b.w-21,by-10,4,8);
+    // 眼睛（紫色發光）
+    X.fillStyle=flash?'#ff0':'#e040ff';
+    X.fillRect(bx+24,by+9,8,5); X.fillRect(bx+b.w-32,by+9,8,5);
+    // 右側砲管臂（爆彈/充能砲）
+    X.fillStyle=charging?(flash?'#fff':'#50b0f0'):mm;
+    X.fillRect(bx+b.w-4,by+20,24,14); X.fillRect(bx+b.w+10,by+23,20,8);
+    X.fillStyle=charging?'rgba(160,228,255,0.55)':'rgba(144,16,208,0.35)';
+    X.beginPath(); X.arc(bx+b.w+22,by+27,9,0,6.28); X.fill();
+    // 左側混沌突變爪臂
+    X.fillStyle=dm; X.fillRect(bx-16,by+20,20,14);
+    X.fillStyle=flash?'#fff':'#c060e0';
+    X.fillRect(bx-20,by+18,6,8); X.fillRect(bx-24,by+16,5,7); X.fillRect(bx-22,by+27,5,7);
+    // 充能蓄力光環
+    if(charging){
+      const cp2=Math.min(1,(b.chargeWind||0)/110);
+      X.strokeStyle='rgba(160,228,255,'+(0.4+cp2*0.5)+')'; X.lineWidth=2+cp2*5;
+      X.beginPath(); X.arc(bx+b.w+22,by+27,12+cp2*14,0,6.28); X.stroke(); X.lineWidth=1;
+    }
+    // 激怒時混沌能量環
+    if(b.hp/b.maxhp<0.4){
+      const rp8=0.25+0.35*Math.abs(Math.sin(b.t*3.5));
+      X.strokeStyle='rgba(144,16,208,'+rp8+')'; X.lineWidth=3;
+      X.beginPath(); X.arc(bx+b.w/2,by+b.h/2,b.w*0.74,0,6.28); X.stroke(); X.lineWidth=1;
+    }
   } else { // level 5 焦血毀滅者：巨爪+焦碳甲殼+背脊
     X.fillStyle=shade(b.col,0.7);
     X.fillRect(bx-16,by+18,20,12); X.fillRect(bx+b.w-4,by+18,20,12); // 側爪
@@ -1920,7 +2075,7 @@ function drawBoss(){
   // 大絕招蓄力 UI
   if(b.ultWind>0){
     const prog=(180-b.ultWind)/180;
-    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏','翼暴咆哮','執刑之刃'];
+    const ultNames=['巢母咆哮','狂暴三連斬','全域污染','幻影刃暴雨','末日星爆','絕命踩踏','翼暴咆哮','執刑之刃','混沌撕裂'];
     // 底部蓄力紅條
     pxs(0,VH-10,VW,10,'rgba(80,0,0,0.7)');
     pxs(0,VH-10,VW*prog,10,'rgba(255,50,30,0.92)');
@@ -2379,7 +2534,7 @@ function drawVictory(){
         X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText('任務成功 — 電磁塔上線，後援趕至！',VW/2,VH/2+16);
         X.fillStyle='rgba(255,160,50,0.4)'; X.font='bold 18px "Courier New"'; X.fillText('MISSION COMPLETE',VW/2,VH/2+36);
       } else {
-        const vText=isTerminalMission?(['巢翼暴君已殞滅 — VOID HUNT CLEAR','蟲族劊子手已殞滅 — FRONTLINE CLEAR'][selTerminalMission]||'任務終端清除'):'巢皇已殞落 — THE EMPEROR PROTECTS';
+        const vText=isTerminalMission?(['巢翼暴君已殞滅 — VOID HUNT CLEAR','蟲族劊子手已殞滅 — FRONTLINE CLEAR','地獄獸已殞滅 — SUPPLY RAID CLEAR'][selTerminalMission]||'任務終端清除'):'巢皇已殞落 — THE EMPEROR PROTECTS';
         X.fillStyle='#5ad6ff'; X.font='10px "Courier New"'; X.fillText(vText,VW/2,VH/2+16);
         X.fillStyle='rgba(255,50,50,0.35)'; X.font='bold 18px "Courier New"'; X.fillText('VICTORY',VW/2,VH/2+36);
       }
