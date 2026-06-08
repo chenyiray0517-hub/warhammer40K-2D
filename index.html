@@ -211,6 +211,8 @@ addEventListener('keydown',e=>{ const k=kmap[e.code]; if(k){ e.preventDefault();
   if(state==='TERMINAL'){
     if(k==='left'){ selTerminalMission=(selTerminalMission-1+TERMINAL_MISSIONS.length)%TERMINAL_MISSIONS.length; sfx('E5'); return; }
     if(k==='right'){ selTerminalMission=(selTerminalMission+1)%TERMINAL_MISSIONS.length; sfx('E5'); return; }
+    if(k==='jump'){ selTerminalDiff=(selTerminalDiff-1+4)%4; sfx('D5'); return; }
+    if(k==='melee'){ selTerminalDiff=(selTerminalDiff+1)%4; sfx('D5'); return; }
     if(k==='start'){ if(!audioReady)initAudio().then(startGame);else startGame(); return; }
     if(k==='pause'||k==='quit'){ state='SELECT'; sfx('E5'); return; }
     return;
@@ -592,12 +594,20 @@ const TERMINAL_MISSIONS=[
    diff:'★★★★★',hpMult:'1.33×',levelIdx:9}
 ];
 let selTerminalMission=0;
+let selTerminalDiff=0;
+const TERMINAL_DIFFS=[
+  {name:'普通', en:'NORMAL',   hpMult:1.0, dmgMult:1.0, col:'#44cc44'},
+  {name:'進階', en:'ADVANCED', hpMult:1.5, dmgMult:1.0, col:'#ffcc00'},
+  {name:'高手', en:'EXPERT',   hpMult:2.0, dmgMult:1.5, col:'#ff8800'},
+  {name:'老手', en:'VETERAN',  hpMult:2.5, dmgMult:1.5, col:'#ff4040'},
+];
+let terminalDiffHpMult=1.0, terminalDiffDmgMult=1.0;
 let isSpecialLevel=false;
 let isTerminalMission=false;
 let victoryWaitingNext=false; // 特殊任務勝利畫面等玩家確認才跳Phase3
 let tutPage=0; const TUT_PAGES_COUNT=6;
 function gotoTutorial(){ tutPage=0; state='TUTORIAL'; }
-function gotoTerminal(){ selTerminalMission=0; allies=[];alliesOY=[];frontlineAlliesSpawned=false;cmdMsgIdx=0; state='TERMINAL'; }
+function gotoTerminal(){ selTerminalMission=0; selTerminalDiff=0; allies=[];alliesOY=[];frontlineAlliesSpawned=false;cmdMsgIdx=0; state='TERMINAL'; }
 function tutorialClick(pt){
   const rect=CV.getBoundingClientRect();
   const ix=(pt.clientX-rect.left)/rect.width*VW, iy=(pt.clientY-rect.top)/rect.height*VH;
@@ -765,14 +775,15 @@ function spawnEnemy(type,x,g){
   else if(type==='flyer'){ Object.assign(b,{w:30,h:22,hp:44,dmg:18,spd:1.0,touch:true,
       flyBase:55+Math.random()*70, bobAmp:16+Math.random()*16, bobSp:0.04+Math.random()*0.03,
       shootCD:90+Math.random()*70, swoop:0, wing:Math.random()*6.28}); }
-  const m=ENEMY_HP_MULT[level]||1; b.hp=Math.round(b.hp*m); b.maxhp=b.hp;
+  const m=ENEMY_HP_MULT[level]||1; b.hp=Math.round(b.hp*m*terminalDiffHpMult); b.maxhp=b.hp;
   if(type==='flyer'){ b.y=b.flyBase; } else { b.y=g-b.h; }
   enemies.push(b);
 }
 function spawnBoss(){
   const b=BOSSES[level];
   const flyY=level===6?GROUND-130:(level===7||level===8)?GROUND-80:GROUND-100;
-  boss={x:camX+VW-100,y:flyY,w:80,h:80,hp:b.hp,maxhp:b.hp,name:b.name,col:b.col,
+  const bHp=Math.round(b.hp*terminalDiffHpMult);
+  boss={x:camX+VW-100,y:flyY,w:80,h:80,hp:bHp,maxhp:bHp,name:b.name,col:b.col,
         t:0,phase:0,shootCD:60,hitFlash:0,baseY:flyY,level:level,tele:0,charge:0,dashV:0,
         ultCD:480,ultWind:0};
   bossIntro=140; setMusic('boss');
@@ -928,6 +939,7 @@ function pickupDrop(d){ switch(d.type){
   } score+=50; }
 function aabb(a,b){ return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y; }
 function hurtPlayer(dmg){ if(player.inv>0||player.blessing>0)return;
+  dmg=Math.round(dmg*terminalDiffDmgMult);
   if(player.shield>0){ const a=Math.min(player.shield,dmg); player.shield-=a; dmg-=a; }
   player.hp-=dmg; player.inv=50; hurtSfx();
   for(let i=0;i<8;i++)particles.push({x:player.x+13,y:player.y+22,vx:(Math.random()-.5)*5,vy:(Math.random()-.5)*5,life:14,c:'#f44'});
@@ -2464,12 +2476,17 @@ function terminalClick(pt){
     if(ix<44 && iy>55 && iy<185){ selTerminalMission=(selTerminalMission-1+TERMINAL_MISSIONS.length)%TERMINAL_MISSIONS.length; sfx('E5'); return; }
     if(ix>VW-44 && iy>55 && iy<185){ selTerminalMission=(selTerminalMission+1)%TERMINAL_MISSIONS.length; sfx('E5'); return; }
   }
+  // 難度按鈕
+  if(iy>=195 && iy<=209){
+    const dfbw=100, dfgap=5, dfx0=(VW-4*dfbw-3*dfgap)/2;
+    for(let i=0;i<4;i++){ if(ix>=dfx0+i*(dfbw+dfgap) && ix<dfx0+i*(dfbw+dfgap)+dfbw){ selTerminalDiff=i; sfx('D5'); return; } }
+  }
   // 出發按鈕
-  if(iy>=207 && iy<=235 && ix>=VW/2-95 && ix<=VW/2+95){
+  if(iy>=213 && iy<=236 && ix>=VW/2-95 && ix<=VW/2+95){
     if(!audioReady)initAudio().then(startGame); else startGame(); return;
   }
   // 返回（底部區域）
-  if(iy>=240){ state='SELECT'; sfx('E5'); return; }
+  if(iy>=242){ state='SELECT'; sfx('E5'); return; }
 }
 function drawTerminal(){
   titleT++;
@@ -2533,17 +2550,31 @@ function drawTerminal(){
     X.fillStyle='rgba(80,40,140,0.5)'; X.fillRect(VW-36,55,36,130);
     X.fillText('▶',VW-18,VH/2+5);
     X.globalAlpha=1;
-    X.fillStyle='#554'; X.font='8px "Courier New"';
-    X.fillText((selTerminalMission+1)+' / '+TERMINAL_MISSIONS.length,CX,cy0+ch+14);
+    X.fillStyle='#554'; X.font='7px "Courier New"';
+    X.fillText((selTerminalMission+1)+' / '+TERMINAL_MISSIONS.length,CX,185);
+  }
+  // 難度選擇
+  X.fillStyle='#776'; X.font='7px "Courier New"'; X.fillText('— 選擇難度 SELECT DIFFICULTY —',CX,192);
+  const dfbw=100, dfbh=14, dfgap=5, dfx0=(VW-4*dfbw-3*dfgap)/2, dfdy=195;
+  for(let i=0;i<4;i++){
+    const d=TERMINAL_DIFFS[i], dx=dfx0+i*(dfbw+dfgap), sel=(i===selTerminalDiff);
+    X.fillStyle=sel?d.col+'33':'rgba(10,5,20,0.75)';
+    X.fillRect(dx,dfdy,dfbw,dfbh);
+    X.strokeStyle=sel?d.col:'#443'; X.lineWidth=sel?1.5:1; X.strokeRect(dx+0.5,dfdy+0.5,dfbw-1,dfbh-1);
+    X.fillStyle=sel?'#fff':d.col+'cc'; X.font=(sel?'bold ':'')+'8px "Courier New"';
+    X.fillText(d.name,dx+dfbw/2,dfdy+9);
+    const sub=i===0?'HP×1':(i===1?'HP×1.5':(i===2?'HP×2 傷×1.5':'HP×2.5 傷×1.5'));
+    X.fillStyle=sel?'#eee':'#556'; X.font='6px "Courier New"';
+    X.fillText(sub,dx+dfbw/2,dfdy+14);
   }
   // 出發按鈕
-  const bw2=190, bby=207, bh2=28, glow=Math.floor(titleT/24)%2===0;
+  const bw2=190, bby=213, bh2=23, glow=Math.floor(titleT/24)%2===0;
   X.fillStyle='rgba(60,15,120,0.75)'; X.fillRect(CX-bw2/2,bby,bw2,bh2);
   X.strokeStyle=glow?'#d0a0ff':'#8040c0'; X.lineWidth=1.5; X.strokeRect(CX-bw2/2+0.5,bby+0.5,bw2-1,bh2-1);
-  X.fillStyle='#fff'; X.font='bold 12px "Courier New"'; X.fillText('⚔ 出發執行任務 ⚔',CX,bby+19);
+  X.fillStyle='#fff'; X.font='bold 12px "Courier New"'; X.fillText('⚔ 出發執行任務 ⚔',CX,bby+16);
   // 提示
   X.fillStyle='#445'; X.font='7px "Courier New"';
-  X.fillText(isMobile?'點擊畫面底部返回選角':'ESC / Q 返回選角  ENTER 出發',CX,251);
+  X.fillText(isMobile?'點擊畫面底部返回選角':'ESC / Q 返回  ENTER 出發  W/K 切難度',CX,249);
   X.textAlign='left';
 }
 function drawSelect(){
@@ -2840,6 +2871,8 @@ function handleStart(){ initAudio().then(()=>{ if(state==='TITLE'||state==='GAME
 function startGame(){
   isSpecialLevel=(selMission===1);
   isTerminalMission=(selMission===2);
+  if(isTerminalMission){terminalDiffHpMult=TERMINAL_DIFFS[selTerminalDiff].hpMult;terminalDiffDmgMult=TERMINAL_DIFFS[selTerminalDiff].dmgMult;}
+  else{terminalDiffHpMult=1;terminalDiffDmgMult=1;}
   level=isSpecialLevel?5:isTerminalMission?TERMINAL_MISSIONS[selTerminalMission].levelIdx:0;
   victoryWaitingNext=false;
   allies=[];alliesOY=[];frontlineAlliesSpawned=false;cmdMsgIdx=0;cmdMsgTime=0;
